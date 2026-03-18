@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { getToken, logout } from "../utils/auth";
-import { useAuth } from "../hooks/useAuth";
+import { useAuth, type JwtPayload } from "../hooks/useAuth";
 import {
   CloudArrowUpIcon,
   MicrophoneIcon,
@@ -32,10 +32,6 @@ const allowedFileTypes = [
 ];
 
 type SentimentType = 'positive' | 'neutral' | 'negative' | 'custom';
-
-interface JwtPayload {
-  exp?: number;
-}
 
 const Upload = () => {
   const tokenFromStorage = getToken();
