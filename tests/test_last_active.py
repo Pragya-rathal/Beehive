@@ -13,7 +13,8 @@ def test_complete_signup_sets_last_active(client):
         "password": "password123"
     }
     
-    with patch("routes.auth.db.users") as mock_users_col:
+    with patch("routes.auth.db.users") as mock_users_col, \
+         patch("routes.auth._validate_otp_verification", return_value=None):
         mock_users_col.find_one.return_value = None  # No duplicate user
         mock_users_col.insert_one.return_value = MagicMock(inserted_id=ObjectId())
         
@@ -44,7 +45,8 @@ def test_set_password_signup_sets_last_active(client):
         "purpose": "signup"
     }
     
-    with patch("routes.auth.db.users") as mock_users_col:
+    with patch("routes.auth.db.users") as mock_users_col, \
+         patch("routes.auth._validate_otp_verification", return_value=None):
         mock_users_col.find_one.return_value = None  # No duplicate user
         mock_users_col.insert_one.return_value = MagicMock(inserted_id=ObjectId())
         
