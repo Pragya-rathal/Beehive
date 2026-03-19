@@ -43,7 +43,6 @@ from database.userdatahandler import (
     get_image_by_id,
     get_image_by_audio_filename,
     search_and_filter_images,
-    get_user_by_username,
     get_user_by_id,
     save_image,
     save_notification,
