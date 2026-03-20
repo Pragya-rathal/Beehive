@@ -111,8 +111,8 @@ ALLOWED_MIME_TYPES = {
     "image/gif",
     "image/webp",
     "image/heif",
-    "application/pdf",
     "image/avif",
+    "application/pdf",
 }
 
 ALLOWED_AUDIO_MIME_TYPES = {
@@ -154,7 +154,8 @@ if (
 app.config["UPLOAD_FOLDER"] = "static/uploads"
 app.config["PDF_THUMBNAIL_FOLDER"] = "static/uploads/thumbnails/"
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
-os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+if os.getenv("FLASK_ENV") == "development":
+    os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 client_secrets_file = os.path.join(pathlib.Path(__file__).parent, "client_secret.json")
 
 
@@ -176,6 +177,7 @@ MIME_SIZE_LIMITS = {
     "image/gif": 8 * 1024 * 1024,
     "image/heif": 15 * 1024 * 1024,
     "image/heic": 15 * 1024 * 1024,
+    "image/avif": 15 * 1024 * 1024,
     "application/pdf": 25 * 1024 * 1024,
 }
 
@@ -964,4 +966,5 @@ app.register_blueprint(auth_bp, url_prefix="/api/auth")
 initialize_text_index()
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    debug_mode = os.getenv("FLASK_DEBUG", "False").strip().lower() in ("true", "1")
+    app.run(debug=debug_mode)
