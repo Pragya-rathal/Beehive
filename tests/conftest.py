@@ -12,17 +12,13 @@ def mock_mongo_client_session():
 def mock_db(mock_mongo_client_session):
     from database.databaseConfig import db
     # Clear all collections
-    for collection in db.list_collection_names():
-        db.drop_collection(collection)
-    yield db
+import os
+import pytest
 
 TEST_SECRET_KEY = 'test-secret-key-minimum-32-chars-long-for-pytest'
 os.environ['FLASK_SECRET_KEY'] = TEST_SECRET_KEY
 os.environ['JWT_SECRET'] = TEST_SECRET_KEY
 
-os.environ.setdefault('FLASK_SECRET_KEY', 'test-secret-key-minimum-32-chars-long-for-pytest')
-
-import pytest
 from app import app as flask_app
 @pytest.fixture
 def app(mock_mongo_client_session):
