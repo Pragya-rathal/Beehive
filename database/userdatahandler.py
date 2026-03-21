@@ -47,7 +47,7 @@ def get_user_by_username(username: str):
 def save_image(id, filename, title, description, time_created, audio_filename=None, sentiment=None):
     try:
         normalized_user_id = ObjectId(id)
-    except Exception:
+    except (TypeError, ValueError):
         # Keep compatibility with non-ObjectId legacy user IDs
         normalized_user_id = id
 
