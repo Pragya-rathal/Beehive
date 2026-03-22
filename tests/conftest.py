@@ -2,11 +2,11 @@ import os
 import pytest
 import mongomock
 from unittest.mock import patch
-from app import app as flask_app
-
 TEST_SECRET_KEY = 'test-secret-key-minimum-32-chars-long-for-pytest'
 os.environ['FLASK_SECRET_KEY'] = TEST_SECRET_KEY
 os.environ['JWT_SECRET'] = TEST_SECRET_KEY
+
+from app import app as flask_app
 
 @pytest.fixture(scope='session', autouse=True)
 def mock_mongo_client_session():
