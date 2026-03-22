@@ -60,19 +60,20 @@ def test_validate_config_short_jwt_secret(monkeypatch, capsys):
     assert "JWT_SECRET is too short" in captured.err
 
 
-def test_validate_config_missing_mongodb_uri(monkeypatch):
-    monkeypatch.setattr(Config, 'MONGODB_URI', None)
+@pytest.mark.parametrize(
+    "key, value",
+    [
+        ("MONGODB_URI", None),
+        ("CORS_ORIGINS", []),
+    ]
+)
+def test_validate_config_missing_required_vars(monkeypatch, key, value):
+    monkeypatch.setattr(Config, key, value)
     with pytest.raises(SystemExit):
         Config.validate_config()
 
 
 def test_validate_config_invalid_mongodb_uri(monkeypatch):
     monkeypatch.setattr(Config, 'MONGODB_URI', "invalid://localhost")
-    with pytest.raises(SystemExit):
-        Config.validate_config()
-
-
-def test_validate_config_missing_cors_origins(monkeypatch):
-    monkeypatch.setattr(Config, 'CORS_ORIGINS', [])
     with pytest.raises(SystemExit):
         Config.validate_config()
