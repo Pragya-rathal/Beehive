@@ -60,9 +60,7 @@ const StatCard = ({
 );
 
 const Dashboard = () => {
-  const [dashboardData, setDashboardData] = useState<DashboardData | null>(
-    null,
-  );
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -123,7 +121,7 @@ const Dashboard = () => {
       const data = await response.json();
       setDashboardData(data);
     } catch (err) {
-      console.error("Error fetching dashboard data:", err);
+      console.error('Error fetching dashboard data:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch dashboard data');
     } finally {
       setLoading(false);
@@ -216,9 +214,7 @@ const Dashboard = () => {
         {/* Recent Activity */}
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md transition-colors duration-200">
           <div className="p-6">
-            <h2 className="text-xl font-semibold mb-4 dark:text-white">
-              Recent Activity
-            </h2>
+            <h2 className="text-xl font-semibold mb-4 dark:text-white">Recent Activity</h2>
 
             {/* filter and sort controls */}
             <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-4 sm:space-y-0">
