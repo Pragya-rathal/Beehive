@@ -160,22 +160,24 @@ if os.getenv("FLASK_ENV") == "development":
 client_secrets_file = os.path.join(pathlib.Path(__file__).parent, "client_secret.json")
 
 
+flow = None
 if os.path.exists(client_secrets_file):
-    flow = Flow.from_client_secrets_file(
-        client_secrets_file=client_secrets_file,
-        scopes=[
-            "https://www.googleapis.com/auth/userinfo.profile",
-            "https://www.googleapis.com/auth/userinfo.email",
-            "openid",
-        ],
-        redirect_uri=os.getenv("REDIRECT_URI", "http://127.0.0.1:5000/admin/login/callback"),
-    )
+    try:
+        flow = Flow.from_client_secrets_file(
+            client_secrets_file=client_secrets_file,
+            scopes=[
+                "https://www.googleapis.com/auth/userinfo.profile",
+                "https://www.googleapis.com/auth/userinfo.email",
+                "openid",
+            ],
+            redirect_uri=os.getenv("REDIRECT_URI", "http://127.0.0.1:5000/admin/login/callback"),
+        )
+    except (ValueError, KeyError, json.JSONDecodeError) as e:
+        app_logger.warning(f"Failed to initialize Google OAuth flow due to invalid client secrets file: {e}")
+    except Exception as e:
+        app_logger.warning(f"Failed to initialize Google OAuth flow: {e}")
 else:
-    flow = None
-    app_logger.warning(
-        "client_secret.json not found. Google OAuth login will be unavailable. "
-        "See docs/setup.md for setup instructions."
-    )
+    app_logger.warning(f"Google OAuth client secrets file not found: {client_secrets_file}. Google Login will be disabled.")
 
 
 MIME_SIZE_LIMITS = {
