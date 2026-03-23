@@ -27,6 +27,7 @@ interface RecentUpload {
 }
 
 interface DashboardData {
+  total: number;
   stats: DashboardStats;
   recentUploads: RecentUpload[];
 }
