@@ -484,12 +484,12 @@ def get_recent_uploads(page=1, limit=10, username_filter=None, from_date=None, e
             sort_criteria = {"username": 1, "created_at": -1}
         elif sort_method == "user_desc":
             sort_criteria = {"username": -1, "created_at": -1}
-        pipeline.append({"$sort": sort_criteria})
-
+        # Perform count before sorting for better performance.
         count_pipeline = pipeline + [{"$count": "total"}]
         count_result = list(beehive_image_collection.aggregate(count_pipeline))
         total_count = count_result[0].get("total", 0) if count_result else 0
 
+        pipeline.append({"$sort": sort_criteria})
         pipeline.append({"$skip": offset})
         pipeline.append({"$limit": limit})
 
