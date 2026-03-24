@@ -644,13 +644,16 @@ def get_lock_status(user_id):
     locked_until = user.get("locked_until")
     now = datetime.now(timezone.utc)
 
-    if locked_until and locked_until.replace(tzinfo=timezone.utc) > now:
-        remaining = int((locked_until.replace(tzinfo=timezone.utc) - now).total_seconds())
-        return {
-            "is_locked": True,
-            "remaining_seconds": remaining,
-            "failed_attempts": user.get("failed_login_attempts", 0),
-        }
+    if locked_until:
+        locked_until_aware = locked_until.replace(tzinfo=timezone.utc)
+        if locked_until_aware > now:
+            remaining = int((locked_until_aware - now).total_seconds())
+            return {
+                "is_locked": True,
+                "remaining_seconds": remaining,
+                "failed_attempts": user.get("failed_login_attempts", 0),
+            }
+
     return {"is_locked": False, "remaining_seconds": 0, "failed_attempts": user.get("failed_login_attempts", 0)}
 
 
