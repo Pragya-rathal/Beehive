@@ -25,7 +25,7 @@ const DeleteModal = ({ image, isDeleting, onClose, onConfirm }: DeleteModalProps
               {image.title || image.filename}
             </p>
             <p className="text-xs text-red-700 dark:text-red-300 mt-1">
-              Associated files, including voice notes, will also be removed.
+              Associated voice notes, will also be removed.
             </p>
           </div>
 
