@@ -759,3 +759,7 @@ def get_user_analytics():
         logger.error(f"Error getting user analytics: {e}")
         return None
     
+
+# Get image record by its filename for ownership verification
+def get_image_by_filename(filename):
+    return beehive_image_collection.find_one({'filename': filename})

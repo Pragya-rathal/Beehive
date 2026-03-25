@@ -19,6 +19,7 @@ import {
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { EmptyGalleryIcon } from '../components/ui/EmptyGalleryIcon';
+import { ProtectedMedia } from '../components/ProtectedRoutes';
 
 interface Upload {
   id: string;
@@ -134,7 +135,7 @@ const Gallery = () => {
   const [totalCount, setTotalCount] = useState(0);
   const [pageSize, setPageSize] = useState(12);
   const observerTarget = useRef<HTMLDivElement | null>(null);
-  
+
   // Search and filter states
   const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
   const [sentiment, setSentiment] = useState(searchParams.get('sentiment') || '');
@@ -143,10 +144,10 @@ const Gallery = () => {
   const [sortBy, setSortBy] = useState(searchParams.get('sort_by') || 'date');
   const [sortOrder, setSortOrder] = useState(searchParams.get('sort_order') || 'desc');
   const [showFilters, setShowFilters] = useState(false);
-  
+
   const [totalResults, setTotalResults] = useState(0);
   const [hasMore, setHasMore] = useState(false);
-  
+
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -161,20 +162,20 @@ const Gallery = () => {
   const generatePageNumbers = (currentPage: number, totalResults: number, pageSize: number) => {
     const totalPageCount = Math.ceil(totalResults / pageSize);
     const pages: number[] = [];
-    
+
     // Always show first page
     pages.push(1);
-    
+
     // Show pages around current page
     for (let i = Math.max(2, currentPage - 1); i <= Math.min(totalPageCount - 1, currentPage + 1); i++) {
       pages.push(i);
     }
-    
+
     // Always show last page
     if (totalPageCount > 1) {
       pages.push(totalPageCount);
     }
-    
+
     // Remove duplicates and sort
     return Array.from(new Set(pages)).sort((a, b) => a - b);
   };
@@ -189,7 +190,7 @@ const Gallery = () => {
     if (sortBy !== 'date') params.sort_by = sortBy;
     if (sortOrder !== 'desc') params.sort_order = sortOrder;
     if (currentPage > 1) params.page = currentPage.toString();
-    
+
     setSearchParams(params, { replace: true });
   }, [searchQuery, sentiment, fromDate, toDate, sortBy, sortOrder, currentPage, setSearchParams]);
 
@@ -227,7 +228,7 @@ const Gallery = () => {
       audioAbortController.current.abort();
       audioAbortController.current = null;
     }
-    
+
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
@@ -240,59 +241,59 @@ const Gallery = () => {
       }
       return null;
     });
-    
+
     setCurrentAudio(null);
     setAudioLoading(false);
   }, []);
 
   // Fetch uploads with search and filters
   const fetchUploads = useCallback(async (page: number = 1, append: boolean = false) => {
-    
+
     // Cancel previous request
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
-    
+
     // Create new AbortController for this request
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
-    
+
     try {
       if (page === 1) {
         setLoading(true);
       } else {
         setLoadingMore(true);
       }
-      
+
       // Always use offset/limit pagination
       const offset = (page - 1) * pageSize;
       const params = new URLSearchParams({
         limit: pageSize.toString(),
         offset: offset.toString(),
       });
-      
+
       if (searchQuery.trim()) params.append('q', searchQuery.trim());
       if (sentiment) params.append('sentiment', sentiment);
       if (fromDate) params.append('from', fromDate);
       if (toDate) params.append('to', toDate);
       if (sortBy) params.append('sort_by', sortBy);
       if (sortOrder) params.append('sort_order', sortOrder);
-      
+
       const response = await authenticatedFetch(`/api/user/user_uploads?${params}`, {
         method: 'GET',
         mode: 'cors',
         signal: abortController.signal
       });
-      
+
       if (!response.ok) {
         throw new Error('Failed to fetch uploads');
       }
-      
+
       const data = await response.json();
       if (data.error) {
         throw new Error(data.error);
       }
-      
+
       // Handle unified response format
       if (append) {
         setImages(prev => [...prev, ...(data.images || [])]);
@@ -323,11 +324,11 @@ const Gallery = () => {
   //Initial fetch and search trigger with debouncing
   useEffect(() => {
     setCurrentPage(1);
-    
+
     searchTimeoutRef.current = setTimeout(() => {
       fetchUploads(1, false);
     }, 300);
-    
+
     return () => {
       if (searchTimeoutRef.current) {
         clearTimeout(searchTimeoutRef.current);
@@ -378,7 +379,7 @@ const Gallery = () => {
       }
     };
   }, [fetchUploads, currentPage, totalPages, hasMore, loadingMore, loading, viewMode, searchQuery, sentiment, fromDate, toDate, sortBy, sortOrder]);
-  
+
   const handleClearFilters = () => {
     setSearchQuery('');
     setSentiment('');
@@ -472,10 +473,33 @@ const Gallery = () => {
     setSelectedFile(null);
   };
 
-  const handleDownload = (filename: string) => {
-    const url = apiUrl(`/static/uploads/${filename}`);
-    window.open(url, '_blank');
-    toast.success('File opened in new window!');
+const handleDownload = async (filename: string, type: 'file' | 'audio' = 'file') => {
+    try {
+      // Audio uses /api/audio/, images use /api/files/
+      const endpoint = type === 'audio' ? `/api/audio/${filename}` : `/api/files/${filename}`;
+      
+      const response = await fetch(apiUrl(endpoint), {
+        headers: { 'Authorization': `Bearer ${getToken()}` }
+      });
+      
+      if (!response.ok) throw new Error('Download failed');
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = filename; // download instead of opening in tab
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      toast.success(`${type === 'file' ? 'File' : 'Audio'} downloaded successfully!`);
+    } catch (error) {
+      console.error('Download error:', error);
+      toast.error('Failed to download file.');
+    }
   };
 
   const handleAudioClick = async (audioFilename: string) => {
@@ -565,36 +589,23 @@ const Gallery = () => {
 
   const renderFilePreview = () => {
     if (!selectedFile) return null;
-
-    const fileUrl = apiUrl(`/static/uploads/${selectedFile}`);
     const isPDF = selectedFile.toLowerCase().endsWith('.pdf');
 
-    if (isPDF) {
-      return (
-        <iframe
-          src={fileUrl}
-          className="w-full h-[80vh]"
-          title="PDF Preview"
-        />
-      );
-    }
-
     return (
-      <img
-        src={fileUrl}
-        alt="Uploaded file"
-        className="max-w-full h-auto mx-auto"
+      <ProtectedMedia
+        filename={selectedFile}
+        isPdf={isPDF}
+        className={isPDF ? "w-full h-[80vh]" : "max-w-full h-auto mx-auto"}
+        alt="File preview"
       />
     );
   };
 
-  const getThumbnailUrl = (filename: string) => {
+  const getThumbnailPath = (filename: string) => {
     if (filename.toLowerCase().endsWith('.pdf')) {
-      // For PDFs, use the thumbnail
-      return apiUrl(`/static/uploads/thumbnails/${filename.replace('.pdf', '.jpg')}`);
+      return `thumbnails/${filename.replace('.pdf', '.jpg')}`;
     }
-    // For images, use the original file
-    return apiUrl(`/static/uploads/${filename}`);
+    return filename;
   };
 
   const getSentimentColor = (sentiment?: string) => {
@@ -697,10 +708,10 @@ const Gallery = () => {
               >
                 <div className="relative w-full h-full max-w-5xl mx-auto">
                   <div className="relative w-full h-full rounded-2xl overflow-hidden shadow-2xl">
-                    <img
-                      src={getThumbnailUrl(filteredImages[currentRollingIndex].filename)}
+                    <ProtectedMedia
+                      filename={getThumbnailPath(filteredImages[currentRollingIndex].filename)}
                       alt={filteredImages[currentRollingIndex].title}
-                      className="w-full h-full object-contain bg-gray-100 dark:bg-gray-800"
+                      className="w-full h-full object-cover transition-transform duration-200"
                     />
 
                     {/* Enhanced Overlay */}
@@ -866,33 +877,30 @@ const Gallery = () => {
               <div className="flex rounded-lg bg-white dark:bg-gray-800 shadow-sm p-1">
                 <button
                   onClick={() => setViewMode('grid')}
-                  className={`p-2 rounded-md transition-colors duration-200 ${
-                    viewMode === 'grid'
-                      ? 'bg-yellow-400 text-black'
-                      : 'text-gray-600 hover:text-yellow-400 dark:text-gray-400'
-                  }`}
+                  className={`p-2 rounded-md transition-colors duration-200 ${viewMode === 'grid'
+                    ? 'bg-yellow-400 text-black'
+                    : 'text-gray-600 hover:text-yellow-400 dark:text-gray-400'
+                    }`}
                   title="Grid View"
                 >
                   <Squares2X2Icon className="h-5 w-5" />
                 </button>
                 <button
                   onClick={() => setViewMode('list')}
-                  className={`p-2 rounded-md transition-colors duration-200 ${
-                    viewMode === 'list'
-                      ? 'bg-yellow-400 text-black'
-                      : 'text-gray-600 hover:text-yellow-400 dark:text-gray-400'
-                  }`}
+                  className={`p-2 rounded-md transition-colors duration-200 ${viewMode === 'list'
+                    ? 'bg-yellow-400 text-black'
+                    : 'text-gray-600 hover:text-yellow-400 dark:text-gray-400'
+                    }`}
                   title="List View"
                 >
                   <ListBulletIcon className="h-5 w-5" />
                 </button>
                 <button
                   onClick={() => setViewMode('rolling')}
-                  className={`p-2 rounded-md transition-colors duration-200 ${
-                    viewMode === 'rolling'
-                      ? 'bg-yellow-400 text-black'
-                      : 'text-gray-600 hover:text-yellow-400 dark:text-gray-400'
-                  }`}
+                  className={`p-2 rounded-md transition-colors duration-200 ${viewMode === 'rolling'
+                    ? 'bg-yellow-400 text-black'
+                    : 'text-gray-600 hover:text-yellow-400 dark:text-gray-400'
+                    }`}
                   title="Rolling View"
                 >
                   <ChevronRightIcon className="h-5 w-5" />
@@ -1111,10 +1119,10 @@ const Gallery = () => {
                       whileHover={{ scale: 1.05 }}
                       transition={{ duration: 0.2 }}
                     >
-                      <img
-                        src={getThumbnailUrl(image.filename)}
+                      <ProtectedMedia
+                        filename={getThumbnailPath(image.filename)}
                         alt={image.title}
-                        className={`w-full h-full object-cover transition-transform duration-200`}
+                        className="w-full h-full object-cover transition-transform duration-200"
                       />
                       {image.sentiment && (
                         <motion.span
@@ -1195,13 +1203,12 @@ const Gallery = () => {
                           <motion.button
                             onClick={() => handleAudioClick(image.audio_filename!)}
                             disabled={audioLoading && currentAudio !== image.audio_filename}
-                            className={`p-1.5 rounded-full transition-colors duration-200 ${
-                              currentAudio === image.audio_filename
-                                ? 'bg-yellow-400 text-black'
-                                : audioLoading
+                            className={`p-1.5 rounded-full transition-colors duration-200 ${currentAudio === image.audio_filename
+                              ? 'bg-yellow-400 text-black'
+                              : audioLoading
                                 ? 'text-gray-400 cursor-not-allowed dark:text-gray-600'
                                 : 'text-gray-600 hover:text-yellow-400 dark:text-gray-400'
-                            }`}
+                              }`}
                             title="Play Voice Note"
                             whileHover={{ scale: audioLoading ? 1 : 1.1 }}
                             whileTap={{ scale: audioLoading ? 1 : 0.95 }}
@@ -1265,22 +1272,20 @@ const Gallery = () => {
               <button
                 onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
                 disabled={currentPage === 1}
-                className={`relative inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md ${
-                  currentPage === 1
-                    ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
-                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-                }`}
+                className={`relative inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md ${currentPage === 1
+                  ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
+                  : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                  }`}
               >
                 Previous
               </button>
               <button
                 onClick={() => setCurrentPage(currentPage + 1)}
                 disabled={!hasMore}
-                className={`ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md ${
-                  !hasMore
-                    ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
-                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-                }`}
+                className={`ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md ${!hasMore
+                  ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
+                  : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                  }`}
               >
                 Next
               </button>
@@ -1299,11 +1304,10 @@ const Gallery = () => {
                   <button
                     onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
                     disabled={currentPage === 1}
-                    className={`relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 dark:border-gray-600 text-sm font-medium ${
-                      currentPage === 1
-                        ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
-                        : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
+                    className={`relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 dark:border-gray-600 text-sm font-medium ${currentPage === 1
+                      ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
+                      : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                      }`}
                   >
                     <span className="sr-only">Previous</span>
                     <ChevronLeftIcon className="h-5 w-5" aria-hidden="true" />
@@ -1322,11 +1326,10 @@ const Gallery = () => {
                         )}
                         <button
                           onClick={() => setCurrentPage(pageNum)}
-                          className={`relative inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium ${
-                            currentPage === pageNum
-                              ? 'z-10 bg-yellow-400 border-yellow-500 text-black'
-                              : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
-                          }`}
+                          className={`relative inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium ${currentPage === pageNum
+                            ? 'z-10 bg-yellow-400 border-yellow-500 text-black'
+                            : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                            }`}
                         >
                           {pageNum}
                         </button>
@@ -1337,11 +1340,10 @@ const Gallery = () => {
                   <button
                     onClick={() => setCurrentPage(currentPage + 1)}
                     disabled={!hasMore}
-                    className={`relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 dark:border-gray-600 text-sm font-medium ${
-                      !hasMore
-                        ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
-                        : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
+                    className={`relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 dark:border-gray-600 text-sm font-medium ${!hasMore
+                      ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
+                      : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                      }`}
                   >
                     <span className="sr-only">Next</span>
                     <ChevronRightIcon className="h-5 w-5" aria-hidden="true" />

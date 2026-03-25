@@ -48,6 +48,7 @@ from database.userdatahandler import (
     save_image,
     save_notification,
     update_image,
+    get_image_by_filename
 )
 
 from utils.jwt_auth import require_auth,require_admin_role 
@@ -153,8 +154,6 @@ if (
     raise ValueError(
         "CRITICAL: Set a secure FLASK_SECRET_KEY (at least 32 characters) in the environment!"
     )
-app.config["UPLOAD_FOLDER"] = "static/uploads"
-app.config["PDF_THUMBNAIL_FOLDER"] = "static/uploads/thumbnails/"
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
 if os.getenv("FLASK_ENV") == "development":
     os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
@@ -687,6 +686,35 @@ def serve_audio(filename):
         logging.error(f"Error serving audio file '{filename}': {str(e)}")
         return jsonify({"error": "Failed to serve audio file"}), 500
 
+@app.route("/api/files/<path:filename>")
+@require_auth
+def serve_protected_file(filename):
+    # Serve files strictly to their owners or admins to prevent IDOR
+    try:
+        db_filename = filename
+        if filename.startswith("thumbnails/"):
+            db_filename = filename.replace("thumbnails/", "")
+            db_filename = db_filename.rsplit('.', 1)[0] + '.pdf'
+        
+        image = get_image_by_filename(db_filename)
+        
+        if not image:
+            return jsonify({"error": "File not found or unassociated"}), 404
+
+        current_user_id = request.current_user.get("id")
+        current_user_role = request.current_user.get("role", "user")
+        
+        is_admin = current_user_role == "admin"
+        is_owner = check_owner(current_user_id, image.get("user_id"))
+
+        if not (is_admin or is_owner):
+            return jsonify({"error": "Unauthorized: You do not have permission to view this file."}), 403
+
+        return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
+
+    except Exception as e:
+        app_logger.error(f"Error serving protected file '{filename}': {str(e)}")
+        return jsonify({"error": "Failed to serve file"}), 500
 
 # Delete images uploaded by the user
 @app.route("/delete/<image_id>", methods=["DELETE"])
