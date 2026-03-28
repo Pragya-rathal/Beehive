@@ -17,7 +17,11 @@ from utils.logger import logger as app_logger
 
 import fitz
 import google.generativeai as genai
-import magic
+try:
+    import magic
+except ImportError:
+    magic = None
+    app_logger.warning("python-magic is not installed; MIME detection is unavailable until dependency is installed.")
 from bson import ObjectId
 from bson.errors import InvalidId
 from flask import (
@@ -360,6 +364,8 @@ def upload_images():
         if MAGIC is not None:
             mime_detector = MAGIC
         else:
+            if magic is None:
+                return jsonify({"error": "Server MIME detection unavailable; contact administrator."}), 500
             global _FALLBACK_MAGIC
             if _FALLBACK_MAGIC is None:
                 try:
