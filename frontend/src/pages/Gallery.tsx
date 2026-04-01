@@ -478,9 +478,7 @@ const handleDownload = async (filename: string, type: 'file' | 'audio' = 'file')
       // Audio uses /api/audio/, images use /api/files/
       const endpoint = type === 'audio' ? `/api/audio/${filename}` : `/api/files/${filename}`;
       
-      const response = await fetch(apiUrl(endpoint), {
-        headers: { 'Authorization': `Bearer ${getToken()}` }
-      });
+      const response = await authenticatedFetch(endpoint);
       
       if (!response.ok) throw new Error('Download failed');
       
