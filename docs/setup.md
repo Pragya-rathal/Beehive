@@ -2,7 +2,7 @@
 
 ## Prerequisites
 - Python 3.x
-- MongoDB (running locally)
+- MongoDB
 - Google OAuth2 credentials
 
 ## Installation
