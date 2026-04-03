@@ -597,7 +597,7 @@ def get_recent_uploads(page=1, limit=10, username_filter=None, from_date=None, e
             },
             {
                 "$lookup": {
-                    "from": "users",
+                    "from": beehive_user_collection.name,
                     "localField": "user_id_obj",
                     "foreignField": "_id",
                     "as": "user_mapping"
