@@ -706,9 +706,9 @@ def serve_protected_file(filename):
     # Serve files strictly to their owners or admins to prevent IDOR
     try:
         if filename.startswith("thumbnails/"):
-            image = userdatahandler.get_image_by_thumbnail(filename)
+            image = get_image_by_thumbnail(filename)
         else:
-            image = userdatahandler.get_image_by_filename(filename)
+            image = get_image_by_filename(filename)
         
         if not image:
             return jsonify({"error": "File not found"}), 404
