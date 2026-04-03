@@ -164,9 +164,19 @@ dmypy.json
 cython_debug/
 
 # Ignore the uploads folder where user files are stored
-static/uploads/
+uploads/
 
 client_secret.json
 user_info.json
 
 .idea/
+
+# Security audit reports
+security_audit_*.txt
+
+
+_bmad
+.claude
+.codex
+.cursor
+.vscode

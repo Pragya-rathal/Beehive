@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from bson.objectid import ObjectId
+from bson.errors import InvalidId
 import re
 import bcrypt
 from flask import session
@@ -25,7 +26,7 @@ def create_user(username, email, password, role="user"):
     }
 
     return beehive_user_collection.insert_one(user).inserted_id
-# Get user by username from MongoDB
+# updates the last_active time
 def update_last_seen(user_id):
     try:
         beehive_user_collection.update_one(
@@ -34,6 +35,7 @@ def update_last_seen(user_id):
         )
     except Exception as e:
         logger.error(f"Failed to update last_active for user {user_id}: {e}")
+# Get user by username from MongoDB
 def get_user_by_username(username: str):
     query = {
         "username": username
@@ -42,19 +44,59 @@ def get_user_by_username(username: str):
     return user
 
 
+def get_user_by_id(user_id: str):
+    """Retrieve a user document by their MongoDB ObjectId string."""
+    try:
+        user = beehive_user_collection.find_one({"_id": ObjectId(user_id)})
+        return user
+    except InvalidId as e:
+        logger.warning(f"Invalid user ID format: {user_id}. Error: {e}")
+        return None
+    except Exception as e:
+        logger.warning(f"Could not retrieve user for id {user_id}: {e}")
+        return None
+
+
 # Save image to MongoDB
-def save_image(id, filename, title, description, time_created, audio_filename=None, sentiment=None):
+def save_image(id, filename, title, description, time_created, audio_filename=None, sentiment=None, thumbnail_filename=None):
+    try:
+        normalized_user_id = ObjectId(id)
+    except (TypeError, ValueError):
+        # Keep compatibility with non-ObjectId legacy user IDs
+        normalized_user_id = id
+
     image = {
-        'user_id': id,
+        'user_id': normalized_user_id,
         'filename': filename,
         'title': title,
         'description': description,
         'created_at': time_created,
         'audio_filename': audio_filename,
-        'sentiment': sentiment
+        'sentiment': sentiment,
+        'thumbnail_filename': thumbnail_filename
     }
     beehive_image_collection.insert_one(image)
     update_last_seen(id)
+
+def get_image_by_thumbnail(thumbnail_filename):
+    # Extract the filename
+    if thumbnail_filename.startswith("thumbnails/"):
+        thumbnail_filename = thumbnail_filename.replace("thumbnails/", "")
+
+    # Case insensitive matching for thumbnail filename
+    image = beehive_image_collection.find_one({
+        'thumbnail_filename': re.compile(f'^{re.escape(thumbnail_filename)}$', re.IGNORECASE)
+    })
+
+    if image:
+        return image
+
+    # map to the original pdf filename in case if thumbnail not found
+    base_name = thumbnail_filename.rsplit('.', 1)[0]
+    return beehive_image_collection.find_one({
+        'filename': re.compile(f'^{re.escape(base_name)}\.pdf$', re.IGNORECASE)
+    })
+    
 # Count all images from MongoDB
 def total_images():
     return beehive_image_collection.count_documents({})
@@ -145,10 +187,33 @@ def _parse_iso_date(date_string, field_name):
         raise ValueError(f"Invalid '{field_name}' date format: {date_string}. Expected ISO format.")
 
 
+def _build_user_id_query(user_id):
+    """
+    Build a MongoDB query that supports both string and ObjectId user IDs.
+    
+    This helper ensures compatibility with legacy string-based user IDs while
+    also supporting ObjectId formatted IDs, providing flexibility across the codebase.
+    
+    Args:
+        user_id: User ID (can be string or ObjectId)
+    
+    Returns:
+        dict: MongoDB query dictionary with '$in' operator for flexible user_id matching
+    """
+    user_id_candidates = {user_id}
+    try:
+        user_id_candidates.add(ObjectId(user_id))
+    except (TypeError, ValueError):
+        # Keep compatibility with legacy/non-ObjectId identifiers.
+        pass
+    
+    return {'user_id': {'$in': list(user_id_candidates)}}
+
+
 def search_and_filter_images(user_id, search_query=None, sentiment=None, from_date=None, to_date=None, 
                              sort_by='date', sort_order='desc', limit=12, offset=0):
     try:
-        query = {'user_id': user_id}
+        query = _build_user_id_query(user_id)
         update_last_seen(user_id)
         if search_query and search_query.strip():
             query['$text'] = {'$search': search_query.strip()}
@@ -244,8 +309,8 @@ def _get_paginated_images_by_user(user_id, page=1, page_size=12, filters=None):
         # Calculate skip for pagination
         skip = (page - 1) * page_size
         
-        # Build query
-        query = {'user_id': user_id}
+        # Build query using both string and ObjectId user ID forms for compatibility.
+        query = _build_user_id_query(user_id)
         
         # Apply filters if provided
         if filters:
@@ -327,6 +392,101 @@ def _get_paginated_images_by_user(user_id, page=1, page_size=12, filters=None):
             'totalPages': 0
         }
 
+def get_user_stats(user_id, trend_days=7):
+    """
+    Return upload statistics for a single user.
+
+    Returns:
+        dict with keys: total_uploads, voice_notes, sentiments (dict),
+        daily_trend (list), last_upload_at (ISO string or None)
+    """
+    try:
+        today_utc = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        trend_start = today_utc - timedelta(days=trend_days - 1)
+
+        pipeline = [
+            {"$match": {"user_id": user_id}},
+            {
+                "$facet": {
+                    "total": [{"$count": "count"}],
+                    "voice_notes": [
+                        {"$match": {"audio_filename": {"$nin": [None, ""]}}},
+                        {"$count": "count"},
+                    ],
+                    "sentiments": [
+                        {"$group": {"_id": "$sentiment", "count": {"$sum": 1}}}
+                    ],
+                    "daily_trend": [
+                        {"$match": {"created_at": {"$gte": trend_start}}},
+                        {
+                            "$group": {
+                                "_id": {
+                                    "$dateToString": {
+                                        "format": "%Y-%m-%d",
+                                        "date": "$created_at",
+                                    }
+                                },
+                                "count": {"$sum": 1},
+                            }
+                        },
+                        {"$sort": {"_id": 1}},
+                    ],
+                    "last_upload": [
+                        {"$sort": {"created_at": -1}},
+                        {"$limit": 1},
+                        {"$project": {"created_at": 1}},
+                    ],
+                }
+            },
+        ]
+
+        result = list(beehive_image_collection.aggregate(pipeline))[0]
+
+        # Sentiments map
+        sentiment_counts = {
+            item["_id"]: item["count"]
+            for item in result.get("sentiments", [])
+            if item.get("_id")
+        }
+
+        # Fill in every day of the trend window (even zero-upload days)
+        upload_map = {item["_id"]: item["count"] for item in result.get("daily_trend", [])}
+        daily_trend = []
+        for i in range(trend_days):
+            date_str = (trend_start + timedelta(days=i)).strftime("%Y-%m-%d")
+            daily_trend.append({"date": date_str, "count": upload_map.get(date_str, 0)})
+
+        # Last upload timestamp
+        last_upload_docs = result.get("last_upload", [])
+        last_upload_at = None
+        if last_upload_docs:
+            ts = last_upload_docs[0].get("created_at")
+            if ts:
+                last_upload_at = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+
+        return {
+            "total_uploads": result["total"][0]["count"] if result.get("total") else 0,
+            "voice_notes": result["voice_notes"][0]["count"] if result.get("voice_notes") else 0,
+            "sentiments": {
+                "positive": sentiment_counts.get("positive", 0),
+                "negative": sentiment_counts.get("negative", 0),
+                "neutral": sentiment_counts.get("neutral", 0),
+            },
+            "daily_trend": daily_trend,
+            "last_upload_at": last_upload_at,
+        }
+
+    except Exception as e:
+        logger.error(f"Error in get_user_stats for user {user_id}: {e}")
+        return {
+            "total_uploads": 0,
+            "voice_notes": 0,
+            "sentiments": {"positive": 0, "negative": 0, "neutral": 0},
+            "daily_trend": [],
+            "last_upload_at": None,
+        }
+
+
 # Get images by sentiments list from MongoDB ( Route to be used with the dreams prototype for analysis page)
 # def get_images_by_sentiments(username, sentiment_list, match_all):
 #     if match_all:
@@ -407,32 +567,69 @@ def get_upload_stats():
         }
 
 # Get recent uploads for admin dashboard
-def get_recent_uploads(limit=10):
-    """Get recent uploads with user information from Clerk for admin dashboard."""
+def get_recent_uploads(page=1, limit=10, username_filter=None, from_date=None, end_date=None, sort_method="date_desc"):
     try:
-        #  Get recent uploads sorted by creation date
-        recent_uploads = list(beehive_image_collection.find().sort(
-            'created_at', -1).limit(limit))
-        if not recent_uploads:
-            return []
-        # collect user ids and query local user collection
-        raw_ids = [upload.get('user_id') for upload in recent_uploads if upload.get('user_id')]
-        object_ids = []
-        for uid in raw_ids:
-            try:
-                object_ids.append(ObjectId(uid))
-            except Exception:
-                # skip invalid ids
-                continue
+        offset = max(0, (page - 1)) * limit
+        pipeline = []
+        match = {}
+        created_at = {}
+        if from_date:
+            created_at["$gte"] = from_date
+        if end_date:
+            created_at["$lte"] = end_date
 
-        users_cursor = beehive_user_collection.find({'_id': {'$in': object_ids}}) if object_ids else []
-        users_data = {str(u['_id']): u for u in users_cursor}
+        if created_at:
+            match["created_at"] = created_at
+        if match:
+            pipeline.append({"$match": match})
+        pipeline.extend([
+            {
+                "$set": {
+                    "user_id_obj": {
+                        "$convert": {
+                            "input": "$user_id",
+                            "to": "objectId",
+                            "onError": None,
+                            "onNull": None
+                        }
+                    }
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "users",
+                    "localField": "user_id_obj",
+                    "foreignField": "_id",
+                    "as": "user_mapping"
+                }
+            },
+            {"$set": {"user_mapping": {"$first": "$user_mapping"}}},
+            {"$set": {"username": "$user_mapping.username"}},
+        ])
+        if username_filter:
+            pipeline.append({"$match": {"username": {"$regex": re.escape(username_filter), "$options": "i"}}})
 
+        sort_criteria = {"created_at": -1}
+        if sort_method == "date_asc":
+            sort_criteria = {"created_at": 1}
+        elif sort_method == "user_asc":
+            sort_criteria = {"username": 1, "created_at": -1}
+        elif sort_method == "user_desc":
+            sort_criteria = {"username": -1, "created_at": -1}
+        # Perform count before sorting for better performance.
+        count_pipeline = pipeline + [{"$count": "total"}]
+        count_result = list(beehive_image_collection.aggregate(count_pipeline))
+        total_count = count_result[0].get("total", 0) if count_result else 0
+
+        pipeline.append({"$sort": sort_criteria})
+        pipeline.append({"$skip": offset})
+        pipeline.append({"$limit": limit})
+
+        result = beehive_image_collection.aggregate(pipeline)
         uploads_list = []
-        for upload in recent_uploads:
+        for upload in result:
             user_id = upload.get('user_id')
-            user = users_data.get(str(user_id)) if user_id else None
-            user_name = user.get('username') if user else 'Unknown User'
+            user_name = upload.get('username') or "Unknown User"
             uploads_list.append({
                 'id': str(upload['_id']),
                 'title': upload.get('title', ''),
@@ -444,11 +641,10 @@ def get_recent_uploads(limit=10):
                 'audio_filename': upload.get('audio_filename', ''),
                 'sentiment': upload.get('sentiment', '')
             })
-        return uploads_list
+        return uploads_list, total_count
     except Exception as e:
         logger.error(f"Error getting recent uploads: {str(e)}")
-        return []
-
+        return [], 0
 
 def save_notification(user_id, username, filename, title, time_created, sentiment):
     # Insert notification for admin
@@ -545,3 +741,62 @@ def get_upload_analytics(trend_days=7):
     except Exception as e:
         logger.error(f"Error getting upload analytics: {e}")
         return None
+def get_user_analytics():
+    try:
+        # Use calendar months for consistency and clarity
+        today_utc = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        start_of_this_month = today_utc.replace(day=1)
+        start_of_last_month = (start_of_this_month - timedelta(days=1)).replace(day=1)
+
+        # Use a single aggregation pipeline for performance
+        pipeline = [
+            {
+                '$facet': {
+                    'total_users': [{'$match': {'role': 'user'}}, {'$count': 'count'}],
+                    'new_users_this_month': [{'$match': {'role': 'user', 'created_at': {'$gte': start_of_this_month}}}, {'$count': 'count'}],
+                    'active_users_this_month': [{'$match': {'role': 'user', 'last_active': {'$gte': start_of_this_month}}}, {'$count': 'count'}],
+                    'active_users_last_month': [{'$match': {'role': 'user', 'last_active': {'$gte': start_of_last_month, '$lt': start_of_this_month}}}, {'$count': 'count'}]
+                }
+            }
+        ]
+
+        data = list(beehive_user_collection.aggregate(pipeline))[0]
+
+        def _get_facet_count(results):
+            return results[0].get('count', 0) if results else 0
+
+        total_users = _get_facet_count(data.get('total_users'))
+        new_users_count = _get_facet_count(data.get('new_users_this_month'))
+        active_users_this_month = _get_facet_count(data.get('active_users_this_month'))
+        active_users_last_month = _get_facet_count(data.get('active_users_last_month'))
+        previous_total_users = total_users - new_users_count
+        if previous_total_users == 0:
+            increase = 100.0 if new_users_count > 0 else 0.0
+        else:
+            increase = (new_users_count / previous_total_users) * 100
+
+        if active_users_last_month == 0:
+            active_increase = 100.0 if active_users_this_month > 0 else 0.0
+        else:
+            active_increase = ((active_users_this_month - active_users_last_month) / active_users_last_month) * 100
+
+        summary = {
+            "users": {
+                "total": total_users,
+                "increase": round(increase, 2)
+            },
+            "activeUsers": {
+                "total": active_users_this_month,
+                "increase": round(active_increase, 2)
+            },
+            "timeframe": "This month"
+        }
+        return {"summary": summary}
+    except Exception as e:
+        logger.error(f"Error getting user analytics: {e}")
+        return None
+    
+
+# Get image record by its filename for ownership verification
+def get_image_by_filename(filename):
+    return beehive_image_collection.find_one({'filename': re.compile(f'^{re.escape(filename)}$', re.IGNORECASE)})
