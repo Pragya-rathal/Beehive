@@ -47,7 +47,7 @@ def admin_user_images_show(user_id):
 @require_admin_role
 def get_dashboard_data():
     try:
-        user = sanitize_api_query(request.args.get("user"))
+        user = sanitize_api_query(request.args.get("user", ""))
 
         try:
             page = int(request.args.get("page", "1"))
