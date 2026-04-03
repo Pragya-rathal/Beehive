@@ -378,7 +378,7 @@ def upload_images():
             mime_detector = MAGIC
         else:
             if magic is None:
-                return error_response("Server MIME detection unavailable; contact administrator."), 500
+                return error_response("Server MIME detection unavailable; contact administrator.", 500)
             global _FALLBACK_MAGIC
             if _FALLBACK_MAGIC is None:
                 try:
