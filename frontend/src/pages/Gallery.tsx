@@ -476,7 +476,9 @@ const Gallery = () => {
 
       pendingDeletionRef.current.delete(id);
       toast.dismiss(pending.toastId);
-      fetchUploads(pending.pageToRefresh, false);
+      if (currentPage === pending.pageToRefresh) {
+        fetchUploads(pending.pageToRefresh, false);
+      }
 
       toast.success('Image deleted successfully!');
     } catch (error) {
