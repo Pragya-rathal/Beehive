@@ -118,7 +118,7 @@ def list_users():
     try:
         limit = int(request.args.get("limit", 10))
         offset = int(request.args.get("offset", 0))
-        query = request.args.get("query", "").strip()
+        query = sanitize_api_query(request.args.get("query", ""))
 
         # Build filter
         mongo_filter = {}

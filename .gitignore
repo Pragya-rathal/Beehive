@@ -180,3 +180,7 @@ _bmad
 .codex
 .cursor
 .vscode
+pip-audit-results.json
+pip-audit-transitive.json
+pip-audit-full.json
+frontend-audit.json
