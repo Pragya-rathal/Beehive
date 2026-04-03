@@ -53,7 +53,8 @@ from database.userdatahandler import (
     save_image,
     save_notification,
     update_image,
-    get_image_by_filename
+    get_image_by_filename,
+    get_image_by_thumbnail
 )
 from utils import error_response
 
