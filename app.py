@@ -865,7 +865,7 @@ def get_admin_notifications():
 
     except Exception as e:
         logging.error(f"Error fetching admin notifications: {str(e)}")
-        return error_response("Failed to fetch notifications. Please try again."), 500
+        return error_response("Failed to fetch notifications. Please try again.", 500)
 
 
 @app.route("/api/admin/notifications/mark_seen", methods=["POST"])
