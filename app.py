@@ -841,7 +841,7 @@ def get_admin_notifications():
             page = int(request.args.get("page", 1))
             per_page = int(request.args.get("limit", 5))
         except ValueError:
-            return error_response("Invalid 'page' or 'limit' parameter. Must be an integer."), 400
+            return error_response("Invalid 'page' or 'limit' parameter. Must be an integer.", 400)
         skip = (page - 1) * per_page
 
         # Count unseen notifications
