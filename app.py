@@ -881,7 +881,7 @@ def mark_selected_notifications_seen():
         try:
             object_ids = [ObjectId(_id) for _id in ids]
         except InvalidId:
-            return error_response("Invalid ID format"), 400
+            return error_response("Invalid ID format", 400)
 
         # Mark only these notifications seen
         notification_collection.update_many(
