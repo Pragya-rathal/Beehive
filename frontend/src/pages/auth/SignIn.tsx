@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { saveToken, getUserRole } from "../../utils/auth";
 import { apiFetch } from "../../utils/apiFetch";
-import { API_BASE_URL } from "../../utils/api";
 import { GoogleLogin } from "@react-oauth/google";
 
 const SignInPage = () => {
@@ -22,30 +21,23 @@ const SignInPage = () => {
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
+      const data = await apiFetch("/api/auth/login", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
-
-      const data = await res.json();
-
-      if (res.status === 429) {
-        setIsLocked(true);
-        setError(data.error || "Account temporarily locked. Please try again later.");
-        return;
-      }
-
-      if (!res.ok) {
-        setError(data.error || "Invalid credentials");
-        return;
-      }
 
       saveToken(data.access_token);
       const role = getUserRole();
       navigate(role === "admin" ? "/admin" : "/dashboard");
-    } catch {
-      setError("Unable to connect. Please check your connection and try again.");
+    } catch (err: any) {
+      if (err.status === 429) {
+        setIsLocked(true);
+        setError(err.message || "Account temporarily locked. Please try again later.");
+      } else if (err.status) {
+        setError(err.message || "Invalid credentials");
+      } else {
+        setError("Unable to connect. Please check your connection and try again.");
+      }
     } finally {
       setLoading(false);
     }

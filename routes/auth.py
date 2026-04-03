@@ -262,6 +262,12 @@ def login():
             "remaining_seconds": lock["remaining_seconds"],
         }), 429
 
+    # Lockout expired but counter still sits at the threshold — reset it so
+    # the user gets a fresh set of attempts rather than locking out immediately
+    # on the next wrong password.
+    if lock["failed_attempts"] >= MAX_FAILED_ATTEMPTS:
+        reset_failed_attempts(user["_id"])
+
     stored_password = user.get("password")
     if not stored_password:
         return jsonify({"error": "Password not set"}), 400

@@ -138,9 +138,12 @@ def list_users():
         users = []
         for u in cursor:
             locked_until = u.get("locked_until")
-            is_locked = bool(
-                locked_until and locked_until.replace(tzinfo=timezone.utc) > now
+            locked_until_aware = (
+                locked_until if locked_until and locked_until.tzinfo is not None
+                else locked_until.replace(tzinfo=timezone.utc) if locked_until
+                else None
             )
+            is_locked = bool(locked_until_aware and locked_until_aware > now)
             users.append({
                 "id": str(u.get("_id")),
                 "user_id": str(u.get("_id")),
