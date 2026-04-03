@@ -92,7 +92,7 @@ def get_image_by_thumbnail(thumbnail_filename):
         return image
 
     # map to the original pdf filename in case if thumbnail not found
-    base_name = re.sub(r'\.[^.]+$', '', thumbnail_filename)
+    base_name = thumbnail_filename.rsplit('.', 1)[0]
     return beehive_image_collection.find_one({
         'filename': re.compile(f'^{re.escape(base_name)}\.pdf$', re.IGNORECASE)
     })
