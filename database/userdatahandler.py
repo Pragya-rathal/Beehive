@@ -401,7 +401,7 @@ def get_user_stats(user_id, trend_days=7):
         daily_trend (list), last_upload_at (ISO string or None)
     """
     try:
-        today_utc = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_utc = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         trend_start = today_utc - timedelta(days=trend_days - 1)
 
         pipeline = [
