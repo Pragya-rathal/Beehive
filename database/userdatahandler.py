@@ -405,7 +405,7 @@ def get_user_stats(user_id, trend_days=7):
         trend_start = today_utc - timedelta(days=trend_days - 1)
 
         pipeline = [
-            {"$match": {"user_id": user_id}},
+            {"$match": _build_user_id_query(user_id)},
             {
                 "$facet": {
                     "total": [{"$count": "count"}],
