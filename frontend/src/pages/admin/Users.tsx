@@ -3,8 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { getToken } from '../../utils/auth';
 import {
   UserIcon,
-  EnvelopeIcon,
-  KeyIcon,
   PhotoIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -22,8 +20,40 @@ interface User {
   lastActive: string;
   status: string;
   image: string;
-  clerkId: string;
 }
+
+interface ApiUser {
+  id?: string;
+  user_id?: string;
+  name?: string;
+  email?: string;
+  role?: string;
+  lastActive?: string;
+  status?: string;
+  image?: string;
+}
+
+const normalizeUser = (user: ApiUser): User => {
+  const id = user.id || user.user_id || '';
+  return {
+    id,
+    user_id: user.user_id || id,
+    name: user.name || '',
+    email: user.email || '',
+    role: user.role || 'user',
+    lastActive: user.lastActive || '',
+    status: user.status || 'active',
+    image: user.image || '',
+  };
+};
+
+const csvEscape = (value: string) => {
+  let cellContent = value;
+  if (['=', '+', '-', '@'].includes(cellContent.charAt(0))) {
+    cellContent = `'${cellContent}`;
+  }
+  return `"${cellContent.replace(/"/g, '""')}"`;
+};
 
 const Users = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -59,9 +89,12 @@ const Users = () => {
       }
       
       const data = await response.json();
-      setUsers(data.users);
+      const normalizedUsers = Array.isArray(data.users)
+        ? data.users.map((user: ApiUser) => normalizeUser(user))
+        : [];
+      setUsers(normalizedUsers);
       // console.log(data.users);
-      setTotalCount(data.totalCount);
+      setTotalCount(Number(data.totalCount) || 0);
     } catch (error) {
       console.error('Error fetching users:', error);
       toast.error('Failed to fetch users');
@@ -91,13 +124,13 @@ const Users = () => {
       // Create CSV content
       const headers = ['Name', 'Email', 'Role', 'Last Active'];
       const csvContent = [
-        headers.join(','), // Header row
+        headers.map(csvEscape).join(','), // Header row
         ...users.map(user => [
           user.name,
           user.email,
           user.role,
           user.lastActive ? new Date(user.lastActive).toLocaleString() : 'Never'
-        ].join(','))
+        ].map(csvEscape).join(','))
       ].join('\n');
 
       // Create blob and download
@@ -203,7 +236,9 @@ const Users = () => {
                               {user.name || 'N/A'}
                             </button>
                               <div className="text-sm text-gray-500 dark:text-gray-400">
-                                {user.email}
+                                <div className="text-sm text-gray-500 dark:text-gray-400">
+                                  {user.email}
+                                </div>
                               </div>
                             </div>
                           </div>

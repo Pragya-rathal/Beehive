@@ -59,7 +59,9 @@ def get_beehive_message_collection():
 def initialize_text_index():
     try:
         image_collection = get_beehive_image_collection()
+        user_collection = get_beehive_user_collection()
         existing_indexes = image_collection.index_information()
+        existing_user_indexes = user_collection.index_information()
         
         if 'title_text_description_text' not in existing_indexes:
             image_collection.create_index([
@@ -69,5 +71,43 @@ def initialize_text_index():
             logger.info("Text index created on image collection")
         else:
             logger.debug("Text index already exists on image collection")
+        # Ensure an index exists for OTP verification queries to keep lookups fast
+        try:
+            otp_collection = beehive.email_otps
+            otp_indexes = otp_collection.index_information()
+            if 'email_verified_idx' not in otp_indexes:
+                otp_collection.create_index(
+                    [("email", 1), ("verified", 1), ("verified_at", -1)],
+                    name='email_verified_idx',
+                )
+                logger.info("Created index on email_otps (email, verified, verified_at)")
+            else:
+                logger.debug("email_verified_idx already exists on email_otps")
+
+            # Add filename and thumbnail_filename indexes
+            if 'filename_1' not in existing_indexes:
+                image_collection.create_index([('filename', 1)], name='filename_1')
+                logger.info("Index created on filename in image collection")
+            if 'thumbnail_filename_1' not in existing_indexes:
+                image_collection.create_index([('thumbnail_filename', 1)], name='thumbnail_filename_1')
+                logger.info("Index created on thumbnail_filename in image collection")
+            
+            # Add user_id and compound user_id + created_at indexes
+            if 'user_id_1' not in existing_indexes:
+                image_collection.create_index([('user_id', 1)], name='user_id_1')
+                logger.info("Index created on user_id in image collection")
+            if 'user_id_1_created_at_-1' not in existing_indexes:
+                image_collection.create_index([('user_id', 1), ('created_at', -1)], name='user_id_1_created_at_-1')
+                logger.info("Compound index created on user_id and created_at in image collection")
+
+            # Add user collection indexes
+            if 'username_1' not in existing_user_indexes:
+                user_collection.create_index([('username', 1)], name='username_1')
+                logger.info("Index created on username in user collection")
+            if 'email_1' not in existing_user_indexes:
+                user_collection.create_index([('email', 1)], name='email_1')
+                logger.info("Index created on email in user collection")
+        except Exception as ie:
+            logger.error(f"Error creating collection indexes: {ie}")
     except Exception as e:
         logger.error(f"Error creating text index: {str(e)}")
