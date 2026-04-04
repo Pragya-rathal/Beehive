@@ -1,6 +1,6 @@
 from dotenv import load_dotenv
 load_dotenv()
-
+import json
 import base64
 import binascii
 import datetime
@@ -17,7 +17,12 @@ from utils.logger import logger as app_logger
 
 import fitz
 import google.generativeai as genai
-import magic
+import logging
+try:
+    import magic
+except ImportError:
+    magic = None
+    logging.warning("python-magic is not installed; MIME detection is unavailable until dependency is installed.")
 from bson import ObjectId
 from bson.errors import InvalidId
 from flask import (
@@ -42,14 +47,16 @@ from database.userdatahandler import (
     delete_image,
     get_image_by_id,
     get_image_by_audio_filename,
-    get_images_by_user,
+    get_user_stats,
     search_and_filter_images,
-    get_user_by_username,
+    get_user_by_id,
     save_image,
     save_notification,
     update_image,
+    get_image_by_filename,
+    get_image_by_thumbnail
 )
-from utils.pagination import parse_pagination_params
+from utils import error_response
 
 from utils.jwt_auth import require_auth,require_admin_role 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
@@ -114,8 +121,8 @@ ALLOWED_MIME_TYPES = {
     "image/gif",
     "image/webp",
     "image/heif",
-    "application/pdf",
     "image/avif",
+    "application/pdf",
 }
 
 ALLOWED_AUDIO_MIME_TYPES = {
@@ -154,22 +161,32 @@ if (
     raise ValueError(
         "CRITICAL: Set a secure FLASK_SECRET_KEY (at least 32 characters) in the environment!"
     )
-app.config["UPLOAD_FOLDER"] = "static/uploads"
-app.config["PDF_THUMBNAIL_FOLDER"] = "static/uploads/thumbnails/"
+app.config["UPLOAD_FOLDER"] = "uploads"
+app.config["PDF_THUMBNAIL_FOLDER"] = "uploads/thumbnails/"
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
-os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+if os.getenv("FLASK_ENV") == "development":
+    os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 client_secrets_file = os.path.join(pathlib.Path(__file__).parent, "client_secret.json")
 
 
-flow = Flow.from_client_secrets_file(
-    client_secrets_file=client_secrets_file,
-    scopes=[
-        "https://www.googleapis.com/auth/userinfo.profile",
-        "https://www.googleapis.com/auth/userinfo.email",
-        "openid",
-    ],
-    redirect_uri=os.getenv("REDIRECT_URI", "http://127.0.0.1:5000/admin/login/callback"),
-)
+flow = None
+if os.path.exists(client_secrets_file):
+    try:
+        flow = Flow.from_client_secrets_file(
+            client_secrets_file=client_secrets_file,
+            scopes=[
+                "https://www.googleapis.com/auth/userinfo.profile",
+                "https://www.googleapis.com/auth/userinfo.email",
+                "openid",
+            ],
+            redirect_uri=os.getenv("REDIRECT_URI", "http://127.0.0.1:5000/admin/login/callback"),
+        )
+    except (ValueError, KeyError, json.JSONDecodeError) as e:
+        app.logger.warning(f"Failed to initialize Google OAuth flow due to invalid client secrets file: {e}")
+    except Exception as e:
+        app.logger.warning(f"Failed to initialize Google OAuth flow: {e}")
+else:
+    app.logger.warning(f"Google OAuth client secrets file not found: {client_secrets_file}. Google Login will be disabled.")
 
 
 MIME_SIZE_LIMITS = {
@@ -179,6 +196,7 @@ MIME_SIZE_LIMITS = {
     "image/gif": 8 * 1024 * 1024,
     "image/heif": 15 * 1024 * 1024,
     "image/heic": 15 * 1024 * 1024,
+    "image/avif": 15 * 1024 * 1024,
     "application/pdf": 25 * 1024 * 1024,
 }
 
@@ -337,7 +355,9 @@ AUDIO_MIME_TO_EXTENSION = {
 def upload_images():
     user_id = request.current_user["id"]
     try:
-        username = sanitize_text(request.form.get("username", ""))
+        # Look up username from DB using the authenticated user_id (fixes issue #553)
+        user_doc = get_user_by_id(user_id) or {}
+        username = user_doc.get("username") or user_doc.get("email") or "Unknown User"
         files = request.files.getlist("files")  # Supports multiple file uploads
         title = sanitize_text(request.form.get("title", ""))
         sentiment = sanitize_text(request.form.get("sentiment"))
@@ -360,6 +380,8 @@ def upload_images():
         if MAGIC is not None:
             mime_detector = MAGIC
         else:
+            if magic is None:
+                return error_response("Server MIME detection unavailable; contact administrator.", 500)
             global _FALLBACK_MAGIC
             if _FALLBACK_MAGIC is None:
                 try:
@@ -369,15 +391,15 @@ def upload_images():
                         "MIME detection unavailable: libmagic missing or misconfigured. Install system libmagic and python-magic. Error: %s",
                         e,
                     )
-                    return jsonify({"error": "Server MIME detection unavailable; contact administrator."}), 500
+                    return error_response("Server MIME detection unavailable; contact administrator.", 500)
             mime_detector = _FALLBACK_MAGIC
 
         for file in files:
             if file:
                 # Validate extension
                 original_filename = secure_filename(file.filename)
-                unique_filename = f"{ObjectId()}_{original_filename}"
-                file_ext = os.path.splitext(original_filename)[1].lstrip('.').lower()
+                unique_filename = f"{ObjectId()}_{original_filename}".lower()
+                file_ext = os.path.splitext(unique_filename)[1].lstrip('.').lower()
                 if file_ext not in ALLOWED_EXTENSIONS:
                     return jsonify(
                         {
@@ -437,7 +459,15 @@ def upload_images():
                     audio_file.save(audio_path)
 
                 # Always safe to call now
-                time_created = datetime.datetime.now()
+                time_created = datetime.datetime.now(datetime.timezone.utc)
+                
+                # Generate pdf thumbnail
+                thumbnail_filename = None
+                if unique_filename.endswith(".pdf"):
+                    name, _ = os.path.splitext(unique_filename)
+                    thumbnail_filename = f"{name}.jpg"
+                    generate_pdf_thumbnail(filepath, unique_filename)
+                
                 save_image(
                     user_id,
                     unique_filename,
@@ -446,14 +476,11 @@ def upload_images():
                     time_created,
                     audio_filename,
                     sentiment,
+                    thumbnail_filename,
                 )
                 save_notification(
                     user_id, username, unique_filename, title, time_created, sentiment
                 )
-
-                # Generate PDF thumbnail if applicable
-                if unique_filename.lower().endswith(".pdf"):
-                    generate_pdf_thumbnail(filepath, unique_filename)
 
         return jsonify({"message": "Upload successful"}), 200
 
@@ -590,7 +617,7 @@ def generate_pdf_thumbnail(pdf_path, filename):
 
             # Robust filename handling
             name, _ = os.path.splitext(filename)
-            thumbnail_filename = f"{name}.jpg"
+            thumbnail_filename = f"{name.lower()}.jpg"
             thumbnail_path = os.path.join(thumbnails_dir, thumbnail_filename)
             image.save(thumbnail_path, "JPEG")
 
@@ -675,6 +702,33 @@ def serve_audio(filename):
         logging.error(f"Error serving audio file '{filename}': {str(e)}")
         return jsonify({"error": "Failed to serve audio file"}), 500
 
+@app.route("/api/files/<path:filename>")
+@require_auth
+def serve_protected_file(filename):
+    # Serve files strictly to their owners or admins to prevent IDOR
+    try:
+        if filename.startswith("thumbnails/"):
+            image = get_image_by_thumbnail(filename)
+        else:
+            image = get_image_by_filename(filename)
+        
+        if not image:
+            return jsonify({"error": "File not found"}), 404
+
+        current_user_id = request.current_user.get("id")
+        current_user_role = request.current_user.get("role", "user")
+        
+        is_admin = current_user_role == "admin"
+        is_owner = str(image.get("user_id")) == current_user_id
+
+        if not (is_admin or is_owner):
+            return jsonify({"error": "Unauthorized: You do not have permission to view this file."}), 403
+
+        return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
+
+    except Exception as e:
+        app.logger.error(f"Error serving protected file '{filename}': {str(e)}")
+        return jsonify({"error": "Failed to serve file"}), 500
 
 # Delete images uploaded by the user
 @app.route("/delete/<image_id>", methods=["DELETE"])
@@ -799,6 +853,18 @@ def user_images_show():
         return jsonify({"error": "Failed to fetch uploads. Please try again."}), 500
 
 
+@app.route("/api/user/stats", methods=["GET"])
+@require_auth
+def user_stats():
+    """Return upload statistics for the authenticated user."""
+    user_id = request.current_user.get("id")
+    if not user_id:
+        return jsonify({"error": "Invalid user"}), 400
+
+    stats = get_user_stats(user_id)
+    return jsonify(stats), 200
+
+
 @app.route("/api/admin/notifications", methods=["GET"])
 @require_admin_role
 def get_admin_notifications():
@@ -809,9 +875,7 @@ def get_admin_notifications():
             page = int(request.args.get("page", 1))
             per_page = int(request.args.get("limit", 5))
         except ValueError:
-            return jsonify(
-                {"error": "Invalid 'page' or 'limit' parameter. Must be an integer."}
-            ), 400
+            return error_response("Invalid 'page' or 'limit' parameter. Must be an integer.", 400)
         skip = (page - 1) * per_page
 
         # Count unseen notifications
@@ -835,7 +899,7 @@ def get_admin_notifications():
 
     except Exception as e:
         logging.error(f"Error fetching admin notifications: {str(e)}")
-        return jsonify({"error": "Failed to fetch notifications. Please try again."}), 500
+        return error_response("Failed to fetch notifications. Please try again.", 500)
 
 
 @app.route("/api/admin/notifications/mark_seen", methods=["POST"])
@@ -851,7 +915,7 @@ def mark_selected_notifications_seen():
         try:
             object_ids = [ObjectId(_id) for _id in ids]
         except InvalidId:
-            return jsonify({"error": "Invalid ID format"}), 400
+            return error_response("Invalid ID format", 400)
 
         # Mark only these notifications seen
         notification_collection.update_many(
@@ -862,7 +926,7 @@ def mark_selected_notifications_seen():
 
     except Exception as e:
         logging.error(f"Error marking notifications as seen: {str(e)}")
-        return jsonify({"error": "Failed to update notifications. Please try again."}), 500
+        return error_response("Failed to update notifications. Please try again.", 500)
 
 
 @app.route("/api/chat/send", methods=["POST"])
@@ -952,7 +1016,7 @@ def health_check():
         return jsonify({
             "status": "unhealthy",
             "error": "Service Unavailable",
-            "timestamp": current_time  # Uses the same variable
+            "timestamp": current_time
         }), 503
     
 
@@ -967,4 +1031,5 @@ app.register_blueprint(auth_bp, url_prefix="/api/auth")
 initialize_text_index()
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    debug_mode = os.getenv("FLASK_DEBUG", "False").strip().lower() in ("true", "1")
+    app.run(debug=debug_mode)
