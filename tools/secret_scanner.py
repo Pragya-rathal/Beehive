@@ -1,7 +1,9 @@
 import re
 import sys
 from pathlib import Path
+import os
 
+from cryptography.fernet import Fernet
 
 class SecretScanner:
     def __init__(self, project_root: str):
@@ -177,10 +179,20 @@ def main():
     print(report)
     
     report_path = project_root / "security_audit_secrets.txt"
-    with open(report_path, 'w', encoding='utf-8') as f:
-        f.write(report)
-    
-    print(f"\nReport saved to: {report_path}")
+    encryption_key = os.environ.get("SECRET_SCANNER_KEY")
+    if encryption_key:
+        try:
+            fernet = Fernet(encryption_key.encode("utf-8"))
+            encrypted_report = fernet.encrypt(report.encode("utf-8"))
+            with open(report_path, 'wb') as f:
+                f.write(encrypted_report)
+            print(f"\nEncrypted report saved to: {report_path}")
+        except Exception as e:
+            print(f"\nWarning: Failed to encrypt report: {e}")
+            print("Report will not be written to disk to avoid storing sensitive data in clear text.")
+    else:
+        print("\nWarning: SECRET_SCANNER_KEY environment variable not set.")
+        print("Report will not be written to disk to avoid storing sensitive data in clear text.")
     
     if scanner.findings:
         sys.exit(1)
