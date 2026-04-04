@@ -72,9 +72,7 @@ Side effects:
 - **Description**: List users from the local MongoDB `users` collection.
 - **Query**: `query` (search), `limit` (default 10), `offset` (default 0)
 - **Responses**:
-  - 200: `{ users: [{ id, user_id, name, role, lastActive, status, image, clerkId }], totalCount }`
-  - 500: `{ error: "Failed to list users" }`
-- **Notes**: `name` is derived from `username` or `email`; `email` is not returned as a separate field.
+  
 
 #### GET `/api/admin/users/only-users`
 - As above, but filters to `role === 'user'`.
