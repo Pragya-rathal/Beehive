@@ -396,8 +396,8 @@ def upload_images():
             if file:
                 # Validate extension
                 original_filename = secure_filename(file.filename)
-                unique_filename = f"{ObjectId()}_{original_filename}"
-                file_ext = os.path.splitext(original_filename)[1].lstrip('.').lower()
+                unique_filename = f"{ObjectId()}_{original_filename}".lower()
+                file_ext = os.path.splitext(unique_filename)[1].lstrip('.').lower()
                 if file_ext not in ALLOWED_EXTENSIONS:
                     return jsonify(
                         {
@@ -461,7 +461,7 @@ def upload_images():
                 
                 # Generate pdf thumbnail
                 thumbnail_filename = None
-                if unique_filename.lower().endswith(".pdf"):
+                if unique_filename.endswith(".pdf"):
                     name, _ = os.path.splitext(unique_filename)
                     thumbnail_filename = f"{name}.jpg"
                     generate_pdf_thumbnail(filepath, unique_filename)
@@ -615,7 +615,7 @@ def generate_pdf_thumbnail(pdf_path, filename):
 
             # Robust filename handling
             name, _ = os.path.splitext(filename)
-            thumbnail_filename = f"{name}.jpg"
+            thumbnail_filename = f"{name.lower()}.jpg"
             thumbnail_path = os.path.join(thumbnails_dir, thumbnail_filename)
             image.save(thumbnail_path, "JPEG")
 

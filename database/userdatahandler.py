@@ -67,13 +67,13 @@ def save_image(id, filename, title, description, time_created, audio_filename=No
 
     image = {
         'user_id': normalized_user_id,
-        'filename': filename,
+        'filename': filename.lower() if filename else filename,
         'title': title,
         'description': description,
         'created_at': time_created,
-        'audio_filename': audio_filename,
+        'audio_filename': audio_filename.lower() if audio_filename else audio_filename,
         'sentiment': sentiment,
-        'thumbnail_filename': thumbnail_filename
+        'thumbnail_filename': thumbnail_filename.lower() if thumbnail_filename else thumbnail_filename
     }
     beehive_image_collection.insert_one(image)
     update_last_seen(id)
@@ -83,9 +83,9 @@ def get_image_by_thumbnail(thumbnail_filename):
     if thumbnail_filename.startswith("thumbnails/"):
         thumbnail_filename = thumbnail_filename.replace("thumbnails/", "")
 
-    # Case insensitive matching for thumbnail filename
+    # Case insensitive matching for thumbnail filename - standardized to lowercase
     image = beehive_image_collection.find_one({
-        'thumbnail_filename': re.compile(f'^{re.escape(thumbnail_filename)}$', re.IGNORECASE)
+        'thumbnail_filename': thumbnail_filename.lower()
     })
 
     if image:
@@ -94,7 +94,7 @@ def get_image_by_thumbnail(thumbnail_filename):
     # map to the original pdf filename in case if thumbnail not found
     base_name = thumbnail_filename.rsplit('.', 1)[0]
     return beehive_image_collection.find_one({
-        'filename': re.compile(f'^{re.escape(base_name)}\.pdf$', re.IGNORECASE)
+        'filename': f"{base_name.lower()}.pdf"
     })
     
 # Count all images from MongoDB
@@ -799,4 +799,4 @@ def get_user_analytics():
 
 # Get image record by its filename for ownership verification
 def get_image_by_filename(filename):
-    return beehive_image_collection.find_one({'filename': re.compile(f'^{re.escape(filename)}$', re.IGNORECASE)})
+    return beehive_image_collection.find_one({'filename': filename.lower()})

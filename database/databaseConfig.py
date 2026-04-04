@@ -81,7 +81,15 @@ def initialize_text_index():
                 logger.info("Created index on email_otps (email, verified, verified_at)")
             else:
                 logger.debug("email_verified_idx already exists on email_otps")
+
+            # Add filename and thumbnail_filename indexes
+            if 'filename_1' not in existing_indexes:
+                image_collection.create_index([('filename', 1)], name='filename_1')
+                logger.info("Index created on filename in image collection")
+            if 'thumbnail_filename_1' not in existing_indexes:
+                image_collection.create_index([('thumbnail_filename', 1)], name='thumbnail_filename_1')
+                logger.info("Index created on thumbnail_filename in image collection")
         except Exception as ie:
-            logger.error(f"Error creating email_otps index: {ie}")
+            logger.error(f"Error creating collection indexes: {ie}")
     except Exception as e:
         logger.error(f"Error creating text index: {str(e)}")
