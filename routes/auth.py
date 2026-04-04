@@ -229,8 +229,8 @@ def login():
             identifier = validate_email(identifier)
         password = sanitize_string(data.get("password"))
     except ValidationError as e:
-        current_app.logger.warning("LOGIN VALIDATION ERROR")
-        return jsonify({"error": str(e)}), 400
+        current_app.logger.warning("LOGIN VALIDATION ERROR: %s", e)
+        return jsonify({"error": "Invalid input"}), 400
 
     user = beehive.users.find_one({
         "$or": [
