@@ -89,6 +89,14 @@ def initialize_text_index():
             if 'thumbnail_filename_1' not in existing_indexes:
                 image_collection.create_index([('thumbnail_filename', 1)], name='thumbnail_filename_1')
                 logger.info("Index created on thumbnail_filename in image collection")
+            
+            # Add user_id and compound user_id + created_at indexes
+            if 'user_id_1' not in existing_indexes:
+                image_collection.create_index([('user_id', 1)], name='user_id_1')
+                logger.info("Index created on user_id in image collection")
+            if 'user_id_1_created_at_-1' not in existing_indexes:
+                image_collection.create_index([('user_id', 1), ('created_at', -1)], name='user_id_1_created_at_-1')
+                logger.info("Compound index created on user_id and created_at in image collection")
         except Exception as ie:
             logger.error(f"Error creating collection indexes: {ie}")
     except Exception as e:
