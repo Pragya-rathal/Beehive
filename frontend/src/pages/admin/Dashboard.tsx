@@ -27,6 +27,7 @@ interface RecentUpload {
 }
 
 interface DashboardData {
+  total: number;
   stats: DashboardStats;
   recentUploads: RecentUpload[];
 }
@@ -69,6 +70,9 @@ const Dashboard = () => {
   const [filterUser, setFilterUser] = useState('');
   const [filterFromDate, setFilterFromDate] = useState('');
   const [filterToDate, setFilterToDate] = useState('');
+  // pagination state
+  const [page, setPage] = useState(1);
+  const limit = 10;
 
   const location = useLocation();
 
@@ -80,13 +84,12 @@ const Dashboard = () => {
       setFilterUser(userParam);
     }
     fetchDashboardData();
-  }, [location.search, sortOption, filterFromDate, filterToDate, filterUser]);
+  }, [location.search,sortOption,filterFromDate,filterToDate,filterUser,page,]);
 
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
       setError(null);
-      
       // Get the JWT token from helper
       const token = getToken();
 
@@ -96,20 +99,21 @@ const Dashboard = () => {
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
-      
       // build query params to send filtering/sorting to server
       const qp = new URLSearchParams();
-      qp.set('limit', '50');
+      qp.set("limit", String(limit));
+      qp.set("page", String(page));
       if (filterUser) qp.set('user', filterUser);
       if (filterFromDate) qp.set('from', filterFromDate);
       if (filterToDate) qp.set('to', filterToDate);
       if (sortOption) qp.set('sort', sortOption);
 
-      const response = await fetch(apiUrl(`/api/admin/dashboard?${qp.toString()}`), {
-        method: 'GET',
-        headers,
-        credentials: 'include',
-      });
+      const response = await fetch(apiUrl(`/api/admin/dashboard?${qp.toString()}`),{
+          method: 'GET',
+          headers,
+          credentials: 'include',
+        },
+      );
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -220,32 +224,53 @@ const Dashboard = () => {
                   type="text"
                   placeholder="Filter by user"
                   value={filterUser}
-                  onChange={(e) => setFilterUser(e.target.value)}
+                  onChange={(e) => {
+                    setFilterUser(e.target.value);
+                    setPage(1);
+                  }}
                   className="px-3 py-2 border rounded-md text-sm w-40 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200 dark:placeholder-gray-400"
                 />
                 <label className="text-sm dark:text-gray-200">From:</label>
                 <input
                   type="date"
                   value={filterFromDate}
-                  onChange={(e) => setFilterFromDate(e.target.value)}
+                  onChange={(e) => {
+                    setFilterFromDate(e.target.value);
+                    setPage(1);
+                  }}
                   className="px-3 py-2 border rounded-md text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
                 />
                 <label className="text-sm dark:text-gray-200">To:</label>
                 <input
                   type="date"
                   value={filterToDate}
-                  onChange={(e) => setFilterToDate(e.target.value)}
+                  onChange={(e) => {
+                    setFilterToDate(e.target.value);
+                    setPage(1);
+                  }}
                   className="px-3 py-2 border rounded-md text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
                 />
               </div>
               <div className="flex items-center space-x-2">
-                <label htmlFor="sort" className="text-sm font-medium dark:text-gray-200">
+                <label
+                  htmlFor="sort"
+                  className="text-sm font-medium dark:text-gray-200"
+                >
                   Sort by:
                 </label>
                 <select
                   id="sort"
                   value={sortOption}
-                  onChange={(e) => setSortOption(e.target.value as 'date_desc'|'date_asc'|'user_asc'|'user_desc')}
+                  onChange={(e) => {
+                    setSortOption(
+                      e.target.value as
+                        | "date_desc"
+                        | "date_asc"
+                        | "user_asc"
+                        | "user_desc",
+                    );
+                    setPage(1);
+                  }}
                   className="px-3 py-2 border rounded-md text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
                 >
                   <option value="date_desc">Date (newest)</option>
@@ -257,16 +282,23 @@ const Dashboard = () => {
             </div>
 
             {displayedUploads.length === 0 ? (
-              <p className="text-gray-500 text-center py-8">No recent activity</p>
+              <p className="text-gray-500 text-center py-8">
+                No recent activity
+              </p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="min-w-full">
                   <thead>
                     <tr className="border-b border-gray-200 dark:border-gray-700">
-                      <th className="text-left py-3 px-4 font-medium text-gray-600 dark:text-gray-400">Title</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-600 dark:text-gray-400">User</th>
-                      {/* <th className="text-left py-3 px-4 font-medium text-gray-600 dark:text-gray-400">Type</th> */}
-                      <th className="text-left py-3 px-4 font-medium text-gray-600 dark:text-gray-400">Timestamp</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-600 dark:text-gray-400">
+                        Title
+                      </th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-600 dark:text-gray-400">
+                        User
+                      </th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-600 dark:text-gray-400">
+                        Timestamp
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -279,13 +311,34 @@ const Dashboard = () => {
                         <td className="py-3 px-4 dark:text-gray-200">{upload.user}</td>
                         <td className="py-3 px-4 dark:text-gray-200">
                           {new Date(upload.timestamp).toLocaleString()}
-                        </td>
+                          </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             )}
+
+            {/* Pagination UI */}
+            <div className="flex justify-between items-center mt-4">
+              <button
+                onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
+                disabled={page === 1}
+                className="px-4 py-2 bg-yellow-400 rounded disabled:opacity-50"
+              >
+                Previous
+              </button>
+
+              <span className="text-sm">Page {page}</span>
+
+              <button
+                onClick={() => setPage((prev) => prev + 1)}
+                disabled={!dashboardData || page * limit >= dashboardData.total}
+                className="px-4 py-2 bg-yellow-400 rounded disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
           </div>
         </div>
       </div>

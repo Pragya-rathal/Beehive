@@ -16,9 +16,14 @@ import {
   MagnifyingGlassIcon,
   FunnelIcon,
 } from '@heroicons/react/24/outline';
-import toast from 'react-hot-toast';
+import toast, { type Toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { EmptyGalleryIcon } from '../components/ui/EmptyGalleryIcon';
+
+import { ProtectedMedia } from '../components/ProtectedRoutes';
+import DeleteModal from '../components/DeleteModal';
+
+const DELETE_UNDO_WINDOW_MS = 5000;
 
 interface Upload {
   id: string;
@@ -34,6 +39,14 @@ interface EditModalProps {
   image: Upload;
   onClose: () => void;
   onSave: (id: string, title: string, description: string, sentiment: string) => void;
+}
+
+interface PendingDeletion {
+  image: Upload;
+  originalIndex: number;
+  pageToRefresh: number;
+  timeoutId: ReturnType<typeof setTimeout>;
+  toastId: string;
 }
 
 const EditModal = ({ image, onClose, onSave }: EditModalProps) => {
@@ -134,7 +147,7 @@ const Gallery = () => {
   const [totalCount, setTotalCount] = useState(0);
   const [pageSize, setPageSize] = useState(12);
   const observerTarget = useRef<HTMLDivElement | null>(null);
-  
+
   // Search and filter states
   const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
   const [sentiment, setSentiment] = useState(searchParams.get('sentiment') || '');
@@ -143,12 +156,15 @@ const Gallery = () => {
   const [sortBy, setSortBy] = useState(searchParams.get('sort_by') || 'date');
   const [sortOrder, setSortOrder] = useState(searchParams.get('sort_order') || 'desc');
   const [showFilters, setShowFilters] = useState(false);
-  
+
+  const [deleteCandidate, setDeleteCandidate] = useState<Upload | null>(null);
+
   const [totalResults, setTotalResults] = useState(0);
   const [hasMore, setHasMore] = useState(false);
-  
+
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const pendingDeletionRef = useRef<Map<string, PendingDeletion>>(new Map());
 
   // Auto-switch from relevance to date when search query is cleared
   useEffect(() => {
@@ -161,20 +177,20 @@ const Gallery = () => {
   const generatePageNumbers = (currentPage: number, totalResults: number, pageSize: number) => {
     const totalPageCount = Math.ceil(totalResults / pageSize);
     const pages: number[] = [];
-    
+
     // Always show first page
     pages.push(1);
-    
+
     // Show pages around current page
     for (let i = Math.max(2, currentPage - 1); i <= Math.min(totalPageCount - 1, currentPage + 1); i++) {
       pages.push(i);
     }
-    
+
     // Always show last page
     if (totalPageCount > 1) {
       pages.push(totalPageCount);
     }
-    
+
     // Remove duplicates and sort
     return Array.from(new Set(pages)).sort((a, b) => a - b);
   };
@@ -189,7 +205,7 @@ const Gallery = () => {
     if (sortBy !== 'date') params.sort_by = sortBy;
     if (sortOrder !== 'desc') params.sort_order = sortOrder;
     if (currentPage > 1) params.page = currentPage.toString();
-    
+
     setSearchParams(params, { replace: true });
   }, [searchQuery, sentiment, fromDate, toDate, sortBy, sortOrder, currentPage, setSearchParams]);
 
@@ -227,7 +243,7 @@ const Gallery = () => {
       audioAbortController.current.abort();
       audioAbortController.current = null;
     }
-    
+
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
@@ -240,62 +256,59 @@ const Gallery = () => {
       }
       return null;
     });
-    
+
     setCurrentAudio(null);
     setAudioLoading(false);
   }, []);
 
   // Fetch uploads with search and filters
   const fetchUploads = useCallback(async (page: number = 1, append: boolean = false) => {
-    
+
     // Cancel previous request
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
-    
+
     // Create new AbortController for this request
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
-    
+
     try {
       if (page === 1) {
         setLoading(true);
       } else {
         setLoadingMore(true);
       }
-      
+
       // Always use offset/limit pagination
       const offset = (page - 1) * pageSize;
       const params = new URLSearchParams({
         limit: pageSize.toString(),
         offset: offset.toString(),
       });
-      
+
       if (searchQuery.trim()) params.append('q', searchQuery.trim());
       if (sentiment) params.append('sentiment', sentiment);
       if (fromDate) params.append('from', fromDate);
       if (toDate) params.append('to', toDate);
       if (sortBy) params.append('sort_by', sortBy);
       if (sortOrder) params.append('sort_order', sortOrder);
-      
+
       const response = await authenticatedFetch(`/api/user/user_uploads?${params}`, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         mode: 'cors',
         signal: abortController.signal
       });
-      
+
       if (!response.ok) {
         throw new Error('Failed to fetch uploads');
       }
-      
+
       const data = await response.json();
       if (data.error) {
         throw new Error(data.error);
       }
-      
+
       // Handle unified response format
       if (append) {
         setImages(prev => [...prev, ...(data.images || [])]);
@@ -307,9 +320,9 @@ const Gallery = () => {
       setTotalPages(Math.ceil((data.total || 0) / pageSize));
       setTotalCount(data.total || 0);
       setCurrentPage(page);
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Ignore abort errors
-      if (error.name === 'AbortError') {
+      if (error instanceof Error && error.name === 'AbortError') {
         return;
       }
       console.error('Error fetching uploads:', error);
@@ -326,11 +339,11 @@ const Gallery = () => {
   //Initial fetch and search trigger with debouncing
   useEffect(() => {
     setCurrentPage(1);
-    
+
     searchTimeoutRef.current = setTimeout(() => {
       fetchUploads(1, false);
     }, 300);
-    
+
     return () => {
       if (searchTimeoutRef.current) {
         clearTimeout(searchTimeoutRef.current);
@@ -353,11 +366,12 @@ const Gallery = () => {
   useEffect(() => {
     if (viewMode === 'rolling') return;
     if (searchQuery || sentiment || fromDate || toDate || sortBy !== 'date' || sortOrder !== 'desc') return; // Disable for search mode
+    if (!hasMore) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
         const target = entries[0];
-        if (target.isIntersecting && !loadingMore && !loading && currentPage < totalPages) {
+        if (target.isIntersecting && !loadingMore && !loading && hasMore && currentPage < totalPages) {
           const nextPage = currentPage + 1;
           fetchUploads(nextPage, true);
         }
@@ -379,8 +393,8 @@ const Gallery = () => {
         observer.unobserve(currentTarget);
       }
     };
-  }, [fetchUploads, currentPage, totalPages, loadingMore, loading, viewMode, searchQuery, sentiment, fromDate, toDate, sortBy, sortOrder]);
-  
+  }, [fetchUploads, currentPage, totalPages, hasMore, loadingMore, loading, viewMode, searchQuery, sentiment, fromDate, toDate, sortBy, sortOrder]);
+
   const handleClearFilters = () => {
     setSearchQuery('');
     setSentiment('');
@@ -423,45 +437,130 @@ const Gallery = () => {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('Are you sure you want to delete this image?')) {
+  const handleDeleteRequest = (image: Upload) => {
+    setDeleteCandidate(image);
+  };
+
+  const restoreDeletedImage = useCallback((image: Upload, originalIndex: number) => {
+    setImages((prev) => {
+      if (prev.some((item) => item.id === image.id)) {
+        return prev;
+      }
+      const next = [...prev];
+      const safeIndex = Math.min(Math.max(originalIndex, 0), next.length);
+      next.splice(safeIndex, 0, image);
+      return next;
+    });
+    setTotalCount((prevCount) => prevCount + 1);
+    setTotalResults((prevTotal) => prevTotal + 1);
+  }, []);
+
+  const finalizeDelete = useCallback(async (id: string) => {
+    const pending = pendingDeletionRef.current.get(id);
+    if (!pending) {
       return;
     }
 
     try {
-      // Optimistically update UI for immediate feedback
-      const newImages = images.filter(img => img.id !== id);
-      setImages(newImages);
-      setTotalCount(prevCount => prevCount - 1);
+      setIsDeleting(true);
 
-      // Perform the deletion
       const response = await authenticatedFetch(`/delete/${id}`, { method: 'DELETE' });
       if (!response.ok) {
         let errorMsg = 'Failed to delete image';
         try {
           const errorData = await response.json();
           errorMsg = errorData.error || errorMsg;
-        } catch (e) {
+        } catch {
           // Response was not JSON, stick with the default message.
         }
         throw new Error(errorMsg);
       }
-      // If the last item on a page (other than the first) was deleted, go to the previous page
-      if (newImages.length === 0 && currentPage > 1) {
-        fetchUploads(currentPage - 1, false);
-      } else {
-        // Refetch the current page to pull a new item from the next page if available
-        // and to ensure pagination metadata is correct
-        fetchUploads(currentPage, false);
+
+      pendingDeletionRef.current.delete(id);
+      toast.dismiss(pending.toastId);
+      if (currentPage === pending.pageToRefresh) {
+        fetchUploads(pending.pageToRefresh, false);
       }
 
       toast.success('Image deleted successfully!');
     } catch (error) {
+      pendingDeletionRef.current.delete(id);
       console.error('Error deleting image:', error);
+      restoreDeletedImage(pending.image, pending.originalIndex);
+      toast.dismiss(pending.toastId);
       toast.error(error instanceof Error ? error.message : 'Failed to delete image');
       // On error, refetch to restore correct state
-      fetchUploads(currentPage, false);
+      fetchUploads(pending.pageToRefresh, false);
+    } finally {
+      setIsDeleting(false);
     }
+  }, [authenticatedFetch, fetchUploads, restoreDeletedImage]);
+
+  const handleUndoDelete = useCallback((id: string) => {
+    const pending = pendingDeletionRef.current.get(id);
+    if (!pending) {
+      return;
+    }
+
+    clearTimeout(pending.timeoutId);
+    pendingDeletionRef.current.delete(id);
+    toast.dismiss(pending.toastId);
+    restoreDeletedImage(pending.image, pending.originalIndex);
+    toast.success('Deletion undone');
+  }, [restoreDeletedImage]);
+
+  const handleConfirmDelete = () => {
+    if (!deleteCandidate) {
+      return;
+    }
+
+    const imageToDelete = deleteCandidate;
+    const targetId = imageToDelete.id;
+    const originalIndex = images.findIndex((img) => img.id === targetId);
+    const remainingImagesCount = images.length - 1;
+    const pageToRefresh = remainingImagesCount === 0 && currentPage > 1 ? currentPage - 1 : currentPage;
+
+    setDeleteCandidate(null);
+    setImages((prev) => prev.filter((img) => img.id !== targetId));
+    setTotalCount((prevCount) => Math.max(0, prevCount - 1));
+    setTotalResults((prevTotal) => Math.max(0, prevTotal - 1));
+
+    const toastId = toast.custom(
+      (t: Toast) => (
+        <div
+          className={`w-[calc(100vw-2rem)] max-w-xs sm:max-w-md bg-red-50 dark:bg-red-950/90 border border-red-300 dark:border-red-700 shadow-2xl rounded-xl pointer-events-auto px-4 py-3 flex items-center justify-between gap-3 ${
+            t.visible ? 'animate-enter' : 'animate-leave'
+          }`}
+        >
+          <p className="text-sm font-medium text-red-900 dark:text-red-100">
+            Image deleted.  
+          </p>
+          <button
+            type="button"
+            onClick={() => handleUndoDelete(targetId)}
+            className="inline-flex items-center rounded-md bg-red-700 hover:bg-red-800 dark:bg-red-500 dark:hover:bg-red-400 px-3 py-1.5 text-sm font-semibold text-white transition-colors duration-200"
+          >
+            Undo
+          </button>
+        </div>
+      ),
+      {
+        duration: DELETE_UNDO_WINDOW_MS,
+        position: 'top-center',
+      }
+    );
+
+    const timeoutId = setTimeout(() => {
+      void finalizeDelete(targetId);
+    }, DELETE_UNDO_WINDOW_MS);
+
+    pendingDeletionRef.current.set(targetId, {
+      image: imageToDelete,
+      originalIndex,
+      pageToRefresh,
+      timeoutId,
+      toastId,
+    });
   };
 
   const handleFileClick = (filename: string) => {
@@ -474,10 +573,31 @@ const Gallery = () => {
     setSelectedFile(null);
   };
 
-  const handleDownload = (filename: string) => {
-    const url = apiUrl(`/static/uploads/${filename}`);
-    window.open(url, '_blank');
-    toast.success('File opened in new window!');
+const handleDownload = async (filename: string, type: 'file' | 'audio' = 'file') => {
+    try {
+      // Audio uses /audio/, images use /api/files/
+      const endpoint = type === 'audio' ? `/audio/${filename}` : `/api/files/${filename}`;
+      
+      const response = await authenticatedFetch(endpoint);
+      
+      if (!response.ok) throw new Error('Download failed');
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = filename; // download instead of opening in tab
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => window.URL.revokeObjectURL(url), 100);
+      document.body.removeChild(a);
+      
+      toast.success(`${type === 'file' ? 'File' : 'Audio'} downloaded successfully!`);
+    } catch (error) {
+      console.error('Download error:', error);
+      toast.error('Failed to download file.');
+    }
   };
 
   const handleAudioClick = async (audioFilename: string) => {
@@ -549,8 +669,8 @@ const Gallery = () => {
           }
         });
       }
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
+    } catch (error: unknown) {
+      if (error instanceof Error && error.name === 'AbortError') {
         return;
       }
       console.error('Error fetching audio:', error);
@@ -565,38 +685,51 @@ const Gallery = () => {
     };
   }, [cleanupAudio]);
 
+  useEffect(() => {
+    const pendingDeletions = pendingDeletionRef.current;
+    return () => {
+      pendingDeletions.forEach((pending, id) => {
+        // Clear the countdown timer to prevent duplicate execution
+        clearTimeout(pending.timeoutId);
+        
+        // Execute the deletion immediately in the background upon unmount.
+        // We bypass the standard finalizeDelete to skip UI-dependent state updates.
+        fetch(apiUrl(`/delete/${id}`), {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${getToken() || ''}`
+          },
+          credentials: 'include'
+        }).catch(error => {
+          console.error(`Background cleanup deletion failed for ${id}:`, error);
+        });
+
+        toast.dismiss(pending.toastId);
+      });
+      pendingDeletions.clear();
+    };
+  }, []);
+
   const renderFilePreview = () => {
     if (!selectedFile) return null;
-
-    const fileUrl = apiUrl(`/static/uploads/${selectedFile}`);
     const isPDF = selectedFile.toLowerCase().endsWith('.pdf');
 
-    if (isPDF) {
-      return (
-        <iframe
-          src={fileUrl}
-          className="w-full h-[80vh]"
-          title="PDF Preview"
-        />
-      );
-    }
-
     return (
-      <img
-        src={fileUrl}
-        alt="Uploaded file"
-        className="max-w-full h-auto mx-auto"
+      <ProtectedMedia
+        filename={selectedFile}
+        isPdf={isPDF}
+        className={isPDF ? "w-full h-[80vh]" : "max-w-full h-auto mx-auto"}
+        alt="File preview"
       />
     );
   };
 
-  const getThumbnailUrl = (filename: string) => {
+  const getThumbnailPath = (filename: string) => {
     if (filename.toLowerCase().endsWith('.pdf')) {
-      // For PDFs, use the thumbnail
-      return apiUrl(`/static/uploads/thumbnails/${filename.replace('.pdf', '.jpg')}`);
+      const baseName = filename.replace(/\.pdf$/i, '');
+      return `thumbnails/${baseName}.jpg`;
     }
-    // For images, use the original file
-    return apiUrl(`/static/uploads/${filename}`);
+    return filename;
   };
 
   const getSentimentColor = (sentiment?: string) => {
@@ -699,10 +832,10 @@ const Gallery = () => {
               >
                 <div className="relative w-full h-full max-w-5xl mx-auto">
                   <div className="relative w-full h-full rounded-2xl overflow-hidden shadow-2xl">
-                    <img
-                      src={getThumbnailUrl(filteredImages[currentRollingIndex].filename)}
+                    <ProtectedMedia
+                      filename={getThumbnailPath(filteredImages[currentRollingIndex].filename)}
                       alt={filteredImages[currentRollingIndex].title}
-                      className="w-full h-full object-contain bg-gray-100 dark:bg-gray-800"
+                      className="w-full h-full object-cover transition-transform duration-200"
                     />
 
                     {/* Enhanced Overlay */}
@@ -765,7 +898,7 @@ const Gallery = () => {
                               </span>
                             </motion.button>
                             <motion.button
-                              onClick={() => handleDelete(filteredImages[currentRollingIndex].id)}
+                              onClick={() => handleDeleteRequest(filteredImages[currentRollingIndex])}
                               className="p-2.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition-all duration-200 group"
                               whileHover={{ scale: 1.1 }}
                               whileTap={{ scale: 0.95 }}
@@ -868,33 +1001,30 @@ const Gallery = () => {
               <div className="flex rounded-lg bg-white dark:bg-gray-800 shadow-sm p-1">
                 <button
                   onClick={() => setViewMode('grid')}
-                  className={`p-2 rounded-md transition-colors duration-200 ${
-                    viewMode === 'grid'
-                      ? 'bg-yellow-400 text-black'
-                      : 'text-gray-600 hover:text-yellow-400 dark:text-gray-400'
-                  }`}
+                  className={`p-2 rounded-md transition-colors duration-200 ${viewMode === 'grid'
+                    ? 'bg-yellow-400 text-black'
+                    : 'text-gray-600 hover:text-yellow-400 dark:text-gray-400'
+                    }`}
                   title="Grid View"
                 >
                   <Squares2X2Icon className="h-5 w-5" />
                 </button>
                 <button
                   onClick={() => setViewMode('list')}
-                  className={`p-2 rounded-md transition-colors duration-200 ${
-                    viewMode === 'list'
-                      ? 'bg-yellow-400 text-black'
-                      : 'text-gray-600 hover:text-yellow-400 dark:text-gray-400'
-                  }`}
+                  className={`p-2 rounded-md transition-colors duration-200 ${viewMode === 'list'
+                    ? 'bg-yellow-400 text-black'
+                    : 'text-gray-600 hover:text-yellow-400 dark:text-gray-400'
+                    }`}
                   title="List View"
                 >
                   <ListBulletIcon className="h-5 w-5" />
                 </button>
                 <button
                   onClick={() => setViewMode('rolling')}
-                  className={`p-2 rounded-md transition-colors duration-200 ${
-                    viewMode === 'rolling'
-                      ? 'bg-yellow-400 text-black'
-                      : 'text-gray-600 hover:text-yellow-400 dark:text-gray-400'
-                  }`}
+                  className={`p-2 rounded-md transition-colors duration-200 ${viewMode === 'rolling'
+                    ? 'bg-yellow-400 text-black'
+                    : 'text-gray-600 hover:text-yellow-400 dark:text-gray-400'
+                    }`}
                   title="Rolling View"
                 >
                   <ChevronRightIcon className="h-5 w-5" />
@@ -1113,10 +1243,10 @@ const Gallery = () => {
                       whileHover={{ scale: 1.05 }}
                       transition={{ duration: 0.2 }}
                     >
-                      <img
-                        src={getThumbnailUrl(image.filename)}
+                      <ProtectedMedia
+                        filename={getThumbnailPath(image.filename)}
                         alt={image.title}
-                        className={`w-full h-full object-cover transition-transform duration-200`}
+                        className="w-full h-full object-cover transition-transform duration-200"
                       />
                       {image.sentiment && (
                         <motion.span
@@ -1166,7 +1296,7 @@ const Gallery = () => {
                               <PencilIcon className="h-4 w-4" />
                             </motion.button>
                             <motion.button
-                              onClick={() => handleDelete(image.id)}
+                              onClick={() => handleDeleteRequest(image)}
                               className="p-1.5 text-gray-600 hover:text-red-500 dark:text-gray-400 transition-colors duration-200"
                               title="Delete"
                               whileHover={{ scale: 1.1 }}
@@ -1197,13 +1327,12 @@ const Gallery = () => {
                           <motion.button
                             onClick={() => handleAudioClick(image.audio_filename!)}
                             disabled={audioLoading && currentAudio !== image.audio_filename}
-                            className={`p-1.5 rounded-full transition-colors duration-200 ${
-                              currentAudio === image.audio_filename
-                                ? 'bg-yellow-400 text-black'
-                                : audioLoading
+                            className={`p-1.5 rounded-full transition-colors duration-200 ${currentAudio === image.audio_filename
+                              ? 'bg-yellow-400 text-black'
+                              : audioLoading
                                 ? 'text-gray-400 cursor-not-allowed dark:text-gray-600'
                                 : 'text-gray-600 hover:text-yellow-400 dark:text-gray-400'
-                            }`}
+                              }`}
                             title="Play Voice Note"
                             whileHover={{ scale: audioLoading ? 1 : 1.1 }}
                             whileTap={{ scale: audioLoading ? 1 : 0.95 }}
@@ -1247,7 +1376,7 @@ const Gallery = () => {
             )}
 
             {/* Infinite scroll observer target */}
-            <div ref={observerTarget} className="h-1" />
+            {hasMore && <div ref={observerTarget} className="h-1" />}
 
             {/* End of page indicator */}
             {currentPage >= totalPages && images.length > 0 && (
@@ -1267,22 +1396,20 @@ const Gallery = () => {
               <button
                 onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
                 disabled={currentPage === 1}
-                className={`relative inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md ${
-                  currentPage === 1
-                    ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
-                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-                }`}
+                className={`relative inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md ${currentPage === 1
+                  ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
+                  : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                  }`}
               >
                 Previous
               </button>
               <button
                 onClick={() => setCurrentPage(currentPage + 1)}
                 disabled={!hasMore}
-                className={`ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md ${
-                  !hasMore
-                    ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
-                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-                }`}
+                className={`ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md ${!hasMore
+                  ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
+                  : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                  }`}
               >
                 Next
               </button>
@@ -1301,11 +1428,10 @@ const Gallery = () => {
                   <button
                     onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
                     disabled={currentPage === 1}
-                    className={`relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 dark:border-gray-600 text-sm font-medium ${
-                      currentPage === 1
-                        ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
-                        : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
+                    className={`relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 dark:border-gray-600 text-sm font-medium ${currentPage === 1
+                      ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
+                      : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                      }`}
                   >
                     <span className="sr-only">Previous</span>
                     <ChevronLeftIcon className="h-5 w-5" aria-hidden="true" />
@@ -1324,11 +1450,10 @@ const Gallery = () => {
                         )}
                         <button
                           onClick={() => setCurrentPage(pageNum)}
-                          className={`relative inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium ${
-                            currentPage === pageNum
-                              ? 'z-10 bg-yellow-400 border-yellow-500 text-black'
-                              : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
-                          }`}
+                          className={`relative inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium ${currentPage === pageNum
+                            ? 'z-10 bg-yellow-400 border-yellow-500 text-black'
+                            : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                            }`}
                         >
                           {pageNum}
                         </button>
@@ -1339,11 +1464,10 @@ const Gallery = () => {
                   <button
                     onClick={() => setCurrentPage(currentPage + 1)}
                     disabled={!hasMore}
-                    className={`relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 dark:border-gray-600 text-sm font-medium ${
-                      !hasMore
-                        ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
-                        : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
+                    className={`relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 dark:border-gray-600 text-sm font-medium ${!hasMore
+                      ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
+                      : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                      }`}
                   >
                     <span className="sr-only">Next</span>
                     <ChevronRightIcon className="h-5 w-5" aria-hidden="true" />
@@ -1359,6 +1483,15 @@ const Gallery = () => {
             image={editingImage}
             onClose={() => setEditingImage(null)}
             onSave={handleSave}
+          />
+        )}
+
+        {deleteCandidate && (
+          <DeleteModal
+            image={deleteCandidate}
+            isDeleting={isDeleting}
+            onClose={() => setDeleteCandidate(null)}
+            onConfirm={handleConfirmDelete}
           />
         )}
 
