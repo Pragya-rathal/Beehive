@@ -450,13 +450,22 @@ def upload_images():
                     if audio_error:
                         return audio_error
 
-                    audio_ext = pathlib.Path(audio_file.filename).suffix.lower() or ".wav"
+                    # Derive and validate the audio file extension from the user-supplied filename.
+                    raw_audio_ext = pathlib.Path(audio_file.filename).suffix.lower()
+                    allowed_audio_exts = {".wav", ".mp3", ".m4a", ".ogg", ".flac"}
+                    audio_ext = raw_audio_ext if raw_audio_ext in allowed_audio_exts else ".wav"
+
                     audio_filename = f"{safe_audio_basename}_{ObjectId()}{audio_ext}"
-                    audio_path = os.path.join(
-                        app.config["UPLOAD_FOLDER"], audio_filename
-                    )
-                    os.makedirs(os.path.dirname(audio_path), exist_ok=True)
-                    audio_file.save(audio_path)
+                    upload_root = app.config["UPLOAD_FOLDER"]
+                    # Build and normalize the audio path, then ensure it stays within upload_root.
+                    audio_path = os.path.normpath(os.path.join(upload_root, audio_filename))
+                    upload_root_abs = os.path.abspath(upload_root)
+                    audio_path_abs = os.path.abspath(audio_path)
+                    if not audio_path_abs.startswith(upload_root_abs + os.sep):
+                        return jsonify({"error": "Invalid audio file path"}), 400
+
+                    os.makedirs(os.path.dirname(audio_path_abs), exist_ok=True)
+                    audio_file.save(audio_path_abs)
 
                 # Always safe to call now
                 time_created = datetime.datetime.now(datetime.timezone.utc)
