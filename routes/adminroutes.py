@@ -11,7 +11,6 @@ from database.userdatahandler import (
     unlock_account,
     get_lock_status,
 )
-from datetime import timezone
 from utils.pagination import parse_pagination_params
 from utils.logger import Logger
 from utils.sanitize import sanitize_api_query
