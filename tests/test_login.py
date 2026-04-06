@@ -45,3 +45,18 @@ def test_login_invalid_credentials(client, created_user, username, password):
     assert response.status_code == 401
     data = response.get_json()
     assert data == {"error": "Invalid credentials"}
+
+def test_login_user_without_password(client, mock_db):
+    """Test login for a user who exists but has no password set (e.g. OAuth user)."""
+    mock_db.users.insert_one({
+        "email": "oauth_user@example.com",
+        "username": "oauthuser",
+        "password": None
+    })
+    response = client.post(
+        "/api/auth/login",
+        json={"username": "oauth_user@example.com", "password": "somepassword"},
+    )
+    assert response.status_code == 401
+    data = response.get_json()
+    assert data == {"error": "Invalid credentials"}
