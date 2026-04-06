@@ -34,13 +34,14 @@ def test_login_success(client, created_user, login_identifier_key):
     assert "access_token" in data
 
 
-def test_login_invalid_credentials(client, created_user):
-    """POST /api/auth/login - invalid credentials should return 401"""
-    response = client.post(
-        "/api/auth/login",
-        json={"username": created_user["email"], "password": "wrongpassword"},
-    )
+@pytest.mark.parametrize(
+    "username,password",
+    [("missing@example.com", "wrongpassword"), ("test@example.com", "wrongpassword")],
+)
+def test_login_invalid_credentials(client, created_user, username, password):
+    """POST /api/auth/login - all authentication failures should return generic 401."""
+    response = client.post("/api/auth/login", json={"username": username, "password": password})
 
     assert response.status_code == 401
     data = response.get_json()
-    assert "access_token" not in data
+    assert data == {"error": "Invalid credentials"}
