@@ -7,6 +7,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   ArrowDownTrayIcon,
+  LockOpenIcon,
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 import { apiUrl } from '../../utils/api';
@@ -20,6 +21,8 @@ interface User {
   lastActive: string;
   status: string;
   image: string;
+  isLocked: boolean;
+  failedAttempts: number;
 }
 
 interface ApiUser {
@@ -115,8 +118,24 @@ const Users = () => {
   };
 
   const handleUserClick = (name: string) => {
-    // redirect to dashboard with user filter in query string
     navigate(`/admin?user=${encodeURIComponent(name)}`);
+  };
+
+  const handleUnlockUser = async (userId: string) => {
+    try {
+      const res = await fetch(apiUrl(`/api/admin/users/${userId}/unlock`), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) throw new Error('Failed to unlock');
+      toast.success('Account unlocked');
+      fetchUsers();
+    } catch {
+      toast.error('Failed to unlock account');
+    }
   };
 
   const handleDownloadCSV = () => {
@@ -269,7 +288,21 @@ const Users = () => {
                           </span>
                         </td> */}
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                          <div className="flex justify-end space-x-3">
+                          <div className="flex justify-end items-center space-x-3">
+                            {user.isLocked && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-200">
+                                Locked
+                              </span>
+                            )}
+                            {user.isLocked && (
+                              <button
+                                onClick={() => handleUnlockUser(user.id)}
+                                className="text-orange-500 hover:text-orange-700 transition-colors duration-200"
+                                title="Unlock Account"
+                              >
+                                <LockOpenIcon className="h-5 w-5" />
+                              </button>
+                            )}
                             <button
                               onClick={() => handleViewUploads(user.id)}
                               className="text-gray-600 hover:text-yellow-400 dark:text-gray-400 transition-colors duration-200"
@@ -277,17 +310,6 @@ const Users = () => {
                             >
                               <PhotoIcon className="h-5 w-5" />
                             </button>
-                            {/* <button
-                              onClick={() => handleToggleStatus(user.id)}
-                              className={`${
-                                user.status === 'active'
-                                  ? 'text-green-600 hover:text-green-700'
-                                  : 'text-red-600 hover:text-red-700'
-                              } transition-colors duration-200`}
-                              title="Toggle Status"
-                            >
-                              <div className="h-5 w-5 rounded-full border-2 border-current" />
-                            </button> */}
                           </div>
                         </td>
                       </tr>
