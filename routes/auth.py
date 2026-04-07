@@ -240,11 +240,11 @@ def login():
     })
 
     if not user:
-        return jsonify({"error": "User not found"}), 401
+        return jsonify({"error": "Invalid credentials"}), 401
 
     stored_password = user.get("password")
     if not stored_password:
-        return jsonify({"error": "Password not set"}), 400
+        return jsonify({"error": "Invalid credentials"}), 401
 
     if not bcrypt.checkpw(password.encode(), stored_password):
         return jsonify({"error": "Invalid credentials"}), 401
