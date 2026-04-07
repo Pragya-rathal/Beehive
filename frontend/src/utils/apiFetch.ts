@@ -29,12 +29,15 @@ export async function apiFetch(
   }
 
   if (!res.ok) {
-    throw new Error(
+    const err = new Error(
       data?.error ||
       data?.message ||
       rawText ||
       `Request failed (${res.status})`
-    );
+    ) as Error & { status: number; data: any };
+    err.status = res.status;
+    err.data = data;
+    throw err;
   }
 
   return data;
