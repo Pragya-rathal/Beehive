@@ -157,7 +157,7 @@ def list_users():
 def list_only_users():
     try:
         users_col = beehive.users
-        cursor = users_col.find({}, {"_id": 1, "username": 1, "email": 1}).limit(100)
+        cursor = users_col.find({"role": "user"}, {"_id": 1, "username": 1, "email": 1}).limit(100)
         users = []
         for u in cursor:
             users.append({
