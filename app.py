@@ -606,7 +606,7 @@ def analyze_media():
 def generate_pdf_thumbnail(pdf_path, filename):
     """Generate an image from the first page of a PDF using PyMuPDF."""
     # Ensure the thumbnails directory exists
-    thumbnails_dir = os.path.join(app.config["UPLOAD_FOLDER"], "thumbnails")
+    thumbnails_dir = app.config["PDF_THUMBNAIL_FOLDER"]
     os.makedirs(thumbnails_dir, exist_ok=True)
 
     try:
@@ -762,9 +762,10 @@ def delete_image_route(image_id):
             return jsonify({"error": "Unauthorized: You do not own this image."}), 403
 
         # Delete image file from upload directory
-        filepath = os.path.join(app.config["UPLOAD_FOLDER"], image["filename"])
-        if os.path.exists(filepath):
-            os.remove(filepath)
+        thumbnail_path = os.path.join(
+    app.config["PDF_THUMBNAIL_FOLDER"],
+    image["filename"].replace(".pdf", ".jpg"),
+)
             # Also delete thumbnail if it exists
             if image["filename"].lower().endswith(".pdf"):
                 thumbnail_path = os.path.join(
