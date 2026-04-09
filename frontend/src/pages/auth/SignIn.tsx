@@ -11,11 +11,13 @@ const SignInPage = () => {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false); // State for visibility
   const [error, setError] = useState("");
+  const [isLocked, setIsLocked] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setIsLocked(false);
     setLoading(true);
 
     try {
@@ -24,13 +26,18 @@ const SignInPage = () => {
         body: JSON.stringify({ username, password }),
       });
 
-      const token = data.access_token;
-      saveToken(token);
-
+      saveToken(data.access_token);
       const role = getUserRole();
       navigate(role === "admin" ? "/admin" : "/dashboard");
     } catch (err: any) {
-      setError(err.message || "Invalid credentials");
+      if (err.status === 429) {
+        setIsLocked(true);
+        setError(err.message || "Account temporarily locked. Please try again later.");
+      } else if (err.status) {
+        setError(err.message || "Invalid credentials");
+      } else {
+        setError("Unable to connect. Please check your connection and try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -48,7 +55,12 @@ const SignInPage = () => {
 
         <form onSubmit={handleSubmit} className="space-y-6">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm text-center">
+            <div className={`border px-4 py-3 rounded-lg text-sm text-center ${
+              isLocked
+                ? "bg-orange-50 border-orange-300 text-orange-700"
+                : "bg-red-50 border-red-200 text-red-600"
+            }`}>
+              {isLocked && <span className="font-semibold block mb-0.5">Account Locked</span>}
               {error}
             </div>
           )}
