@@ -95,12 +95,12 @@ def get_dashboard_data():
 @require_admin_role
 def get_all_analytics():
     try:
-        days_param = request.args.get("days", 7)
         try:
             days_ago = int(days_param)
+            if not (1 <= days_ago <= 365):
+                raise ValueError()
         except (ValueError, TypeError):
-            return jsonify({"error": "Invalid 'days' parameter"}), 400
-        if not 1 <= days_ago <= 365:
+            return jsonify({"error": "Invalid 'days' parameter. It must be an integer between 1 and 365."}), 400
             return jsonify({"error": "Invalid 'days' parameter"}), 400
 
         upload_data = get_upload_analytics(trend_days=days_ago)
