@@ -100,8 +100,7 @@ def get_all_analytics():
             days_ago = int(days_param)
         except (ValueError, TypeError):
             return jsonify({"error": "Invalid 'days' parameter"}), 400
-        if not 1 <= days_ago <= 365:
-            return jsonify({"error": "Invalid 'days' parameter"}), 400
+        
 
         upload_data = get_upload_analytics(trend_days=days_ago)
         user_data = get_user_analytics()
