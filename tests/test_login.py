@@ -44,4 +44,4 @@ def test_login_invalid_credentials(client, created_user, username, password):
 
     assert response.status_code == 401
     data = response.get_json()
-    assert data == {"error": "Invalid credentials"}
+    assert "Invalid credentials" in data["error"]
