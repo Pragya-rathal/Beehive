@@ -4,7 +4,6 @@ import json
 import base64
 import binascii
 import datetime
-import json
 import logging
 import os
 import pathlib
@@ -17,7 +16,6 @@ from utils.logger import logger as app_logger
 
 import fitz
 import google.generativeai as genai
-import logging
 try:
     import magic
 except ImportError:
