@@ -711,6 +711,108 @@ def save_notification(user_id, username, filename, title, time_created, sentimen
     beehive_notification_collection.insert_one(notification)
 
 
+MAX_FAILED_ATTEMPTS = 5
+LOCKOUT_DURATION_MINUTES = 15
+
+
+def get_lock_status(user_id_or_doc, now=None):
+    """Return lock info for a user: is_locked, remaining_seconds, failed_attempts.
+
+    Accepts either a user ID (str or ObjectId) or an already-fetched user
+    document (dict), avoiding a redundant DB query when the caller has the
+    document in hand.  An optional ``now`` datetime can be injected for testing.
+    """
+    if isinstance(user_id_or_doc, dict):
+        user = user_id_or_doc
+    else:
+        try:
+            uid = user_id_or_doc if isinstance(user_id_or_doc, ObjectId) else ObjectId(user_id_or_doc)
+        except (InvalidId, TypeError):
+            return {"is_locked": False, "remaining_seconds": 0, "failed_attempts": 0}
+        user = beehive_user_collection.find_one(
+            {"_id": uid},
+            {"failed_login_attempts": 1, "locked_until": 1}
+        )
+
+    if not user:
+        return {"is_locked": False, "remaining_seconds": 0, "failed_attempts": 0}
+
+    locked_until = user.get("locked_until")
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    locked_until_aware = (
+        locked_until if locked_until and locked_until.tzinfo is not None
+        else locked_until.replace(tzinfo=timezone.utc) if locked_until
+        else None
+    )
+    failed_attempts = user.get("failed_login_attempts", 0)
+    if locked_until_aware and locked_until_aware > now:
+        remaining = int((locked_until_aware - now).total_seconds() + 1)
+        return {
+            "is_locked": True,
+            "remaining_seconds": remaining,
+            "failed_attempts": failed_attempts,
+        }
+    return {"is_locked": False, "remaining_seconds": 0, "failed_attempts": failed_attempts}
+
+
+def increment_failed_attempts(user_id):
+    """Increment failed login counter; lock the account if threshold is reached.
+
+    Returns the new failed attempt count.
+    """
+    try:
+        uid = user_id if isinstance(user_id, ObjectId) else ObjectId(user_id)
+    except (InvalidId, TypeError):
+        return 0
+
+    result = beehive_user_collection.find_one_and_update(
+        {"_id": uid},
+        {"$inc": {"failed_login_attempts": 1}},
+        return_document=True,
+        projection={"failed_login_attempts": 1},
+    )
+    if not result:
+        return 0
+
+    new_count = result.get("failed_login_attempts", 0)
+    if new_count >= MAX_FAILED_ATTEMPTS:
+        locked_until = datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
+        beehive_user_collection.update_one(
+            {"_id": uid},
+            {"$set": {"locked_until": locked_until}},
+        )
+    return new_count
+
+
+def reset_failed_attempts(user_id):
+    """Clear the failed login counter and any lockout on successful authentication."""
+    try:
+        uid = user_id if isinstance(user_id, ObjectId) else ObjectId(user_id)
+    except (InvalidId, TypeError):
+        return
+
+    beehive_user_collection.update_one(
+        {"_id": uid},
+        {"$unset": {"failed_login_attempts": "", "locked_until": ""}},
+    )
+
+
+def unlock_account(user_id):
+    """Admin action: remove lockout and reset failed attempts. Returns True if user found."""
+    try:
+        uid = user_id if isinstance(user_id, ObjectId) else ObjectId(user_id)
+    except (InvalidId, TypeError):
+        return False
+
+    result = beehive_user_collection.update_one(
+        {"_id": uid},
+        {"$unset": {"failed_login_attempts": "", "locked_until": ""}},
+    )
+    return result.matched_count > 0
+
+
 def get_all_users():
     users = beehive_user_collection.find({}, {'_id': 1, 'username': 1})
     return list(users)
