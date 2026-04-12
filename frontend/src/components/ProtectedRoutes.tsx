@@ -101,16 +101,17 @@ export const ProtectedAudio = ({ filename, className = '', onEnded }: ProtectedA
 
   useEffect(() => {
     let objectUrl: string | null = null;
-    let isCancelled = false;
+    const controller = new AbortController();
 
     const fetchAudio = async () => {
       setSrc(null);
       setError(false);
       try {
         const token = getToken();
-        const response = await fetch(encodeURI(apiUrl(`/api/audio/${encodeURIComponent(filename)}`)), {
+        const response = await fetch(apiUrl(`/api/audio/${encodeURIComponent(filename)}`), {
           headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-          credentials: 'include'
+          credentials: 'include',
+          signal: controller.signal
         });
 
         if (!response.ok) {
@@ -118,12 +119,12 @@ export const ProtectedAudio = ({ filename, className = '', onEnded }: ProtectedA
         }
 
         const blob = await response.blob();
-        if (isCancelled) return;
+        if (controller.signal.aborted) return;
 
         objectUrl = URL.createObjectURL(blob);
         setSrc(objectUrl);
       } catch (error) {
-        if (isCancelled) return;
+        if (error instanceof DOMException && error.name === 'AbortError') return;
         console.error('Failed to load secure audio', error);
         setError(true);
       }
@@ -137,7 +138,7 @@ export const ProtectedAudio = ({ filename, className = '', onEnded }: ProtectedA
     }
 
     return () => {
-      isCancelled = true;
+      controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [filename]);
