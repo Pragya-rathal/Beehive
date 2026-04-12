@@ -10,7 +10,14 @@ from bson.errors import InvalidId
 
 from utils.validation import validate_email, validate_otp, sanitize_string, ValidationError
 from database.databaseConfig import db
-from database.userdatahandler import update_last_seen
+from database.userdatahandler import (
+    update_last_seen,
+    get_lock_status,
+    increment_failed_attempts,
+    reset_failed_attempts,
+    MAX_FAILED_ATTEMPTS,
+    LOCKOUT_DURATION_MINUTES,
+)
 from utils.roles import is_admin_email
 from utils.jwt_auth import create_access_token, require_auth
 from database.databaseConfig import beehive
@@ -240,15 +247,44 @@ def login():
     })
 
     if not user:
-        return jsonify({"error": "User not found"}), 401
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    # Check account lockout before touching the password
+    lock = get_lock_status(user)
+    if lock["is_locked"]:
+        mins = lock["remaining_seconds"] // 60
+        secs = lock["remaining_seconds"] % 60
+        return jsonify({
+            "error": f"Account locked. Try again in {mins}m {secs}s.",
+            "locked": True,
+            "remaining_seconds": lock["remaining_seconds"],
+        }), 429
+
+    # Lockout expired but counter still sits at the threshold — reset it so
+    # the user gets a fresh set of attempts rather than locking out immediately
+    # on the next wrong password.
+    if lock["failed_attempts"] >= MAX_FAILED_ATTEMPTS:
+        reset_failed_attempts(user["_id"])
 
     stored_password = user.get("password")
     if not stored_password:
         return jsonify({"error": "Password not set"}), 400
 
     if not bcrypt.checkpw(password.encode(), stored_password):
-        return jsonify({"error": "Invalid credentials"}), 401
+        new_count = increment_failed_attempts(user["_id"])
+        attempts_left = MAX_FAILED_ATTEMPTS - new_count
+        if attempts_left <= 0:
+            return jsonify({
+                "error": f"Account locked due to too many failed attempts. Try again in {LOCKOUT_DURATION_MINUTES} minutes.",
+                "locked": True,
+                "remaining_seconds": LOCKOUT_DURATION_MINUTES * 60,
+            }), 429
+        return jsonify({
+            "error": f"Invalid credentials. {attempts_left} attempt{'s' if attempts_left != 1 else ''} remaining before lockout.",
+        }), 401
 
+    # Successful login — clear any previous failed attempts
+    reset_failed_attempts(user["_id"])
     token = create_access_token(
         user_id=str(user["_id"]),
         role=user.get("role", "user")
