@@ -16,7 +16,6 @@ from utils.logger import logger as app_logger
 
 import fitz
 import google.generativeai as genai
-import logging
 try:
     import magic
 except ImportError:
